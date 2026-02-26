@@ -1,0 +1,690 @@
+{% extends "base.html" %}
+
+{% block title %}Expense Tracker Pro{% endblock %}
+
+{% block content %}
+<div
+    x-data="expenseDashboard({
+        initialPayload: {{ dashboard_payload | tojson }},
+        initialCategory: {{ selected_category | tojson }},
+        initialMonth: {{ selected_month | tojson }},
+        today: {{ today | tojson }},
+        initialCurrencyCode: {{ current_currency | tojson }},
+        initialCurrencySymbol: {{ current_currency_symbol | tojson }}
+    })"
+    x-init="init()"
+>
+    <div class="toast-stack">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="app-toast mb-2" :class="toast.type === 'success' ? 'toast-success' : 'toast-error'">
+                <div class="d-flex align-items-start justify-content-between gap-3">
+                    <span x-text="toast.message"></span>
+                    <button type="button" class="btn btn-sm btn-link p-0 text-reset text-decoration-none" @click="dismissToast(toast.id)">x</button>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <button onclick="toggleDark()" class="btn btn-outline-secondary mb-3">
+        Toggle Dark Mode
+    </button>
+
+    {% if success %}
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        Expense added successfully!
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="d-flex">
+
+        <!-- Sidebar -->
+        <div class="bg-dark text-white p-4" style="width: 250px; min-height: 100vh;">
+            <h4 class="mb-4">ExpensePro</h4>
+            <ul class="nav flex-column">
+                <li class="nav-item mb-2">
+                    <a class="nav-link text-white" href="#">Dashboard</a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a class="nav-link text-white" href="#">Expenses</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-white" href="#">Settings</a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-grow-1 p-5">
+            <h2 class="mb-4">Dashboard</h2>
+
+            <div class="card shadow-sm p-4">
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card shadow-sm p-4">
+                            <h6 class="text-muted">Total Expenses</h6>
+                            <h3 class="fw-bold">$ {{ total }}</h3>
+                        </div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <div class="card shadow-sm p-4">
+                            <h6 class="text-muted">This Month</h6>
+                            <h3 class="fw-bold">$ {{ monthly_total }}</h3>
+                        </div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <div class="card shadow-sm p-4">
+                            <h6 class="text-muted">Transactions</h6>
+                            <h3 class="fw-bold">{{ expenses|length }}</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-4">
+                    <section class="col-lg-8">
+                        <div class="card app-card hover-lift h-100">
+                            <div class="card-body p-4">
+                                <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end mb-3">
+                                    <h2 class="section-title mb-0">{{ t('filters') }}</h2>
+                                    <button class="btn btn-primary btn-lg" type="button" @click="openAddModal()">
+                                        + {{ t('add_expense') }}
+                                    </button>
+                                </div>
+                                <form @submit.prevent="applyFilters()" class="row g-3 align-items-end">
+                                    <div class="col-md-5">
+                                        <label for="filter_category" class="form-label">{{ t('category') }}</label>
+                                        <select id="filter_category" class="form-select form-select-lg" x-model="filters.category">
+                                            <option value="">{{ t('all_categories') }}</option>
+                                            <template x-for="category in categories" :key="category">
+                                                <option :value="category" x-text="category"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="filter_month" class="form-label">{{ t('month') }}</label>
+                                        <input id="filter_month" class="form-control form-control-lg" type="month" x-model="filters.month">
+                                    </div>
+                                    <div class="col-md-3 d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary btn-lg flex-fill" :disabled="loading.dashboard">
+                                            <span x-show="!loading.dashboard">{{ t('apply') }}</span>
+                                            <span x-show="loading.dashboard" class="d-inline-flex align-items-center">
+                                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                                {{ t('loading') }}
+                                            </span>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-lg flex-fill" @click="clearFilters()" :disabled="loading.dashboard">{{ t('clear') }}</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="col-lg-4">
+                        <div class="card app-card hover-lift h-100">
+                            <div class="card-body p-4">
+                                <h2 class="section-title mb-3">{{ t('totals') }}</h2>
+                                <div class="metric-card mb-3">
+                                    <p class="metric-label mb-1">{{ t('filtered_total') }}</p>
+                                    <p class="metric-value mb-0" x-text="formatMoney(totals.filtered)"></p>
+                                </div>
+                                <div class="metric-card">
+                                    <p class="metric-label mb-1">{{ t('overall_total') }}</p>
+                                    <p class="metric-value mb-0" x-text="formatMoney(totals.overall)"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="col-12">
+                        <div class="card shadow-sm p-4 mb-4">
+                            <h5 class="mb-4">Spending Overview</h5>
+                            <canvas id="expenseChart"></canvas>
+                        </div>
+                    </section>
+
+                    <section class="col-12">
+                        <div class="card app-card hover-lift">
+                            <div class="card-body p-4">
+                                <h2 class="section-title mb-3">{{ t('analytics_dashboard') }}</h2>
+                                <div class="row g-3">
+                                    <div class="col-lg-4">
+                                        <article class="chart-card h-100">
+                                            <h3 class="chart-title">{{ t('pie_by_category') }}</h3>
+                                            <div class="chart-wrap">
+                                                <canvas id="categoryPieChart"></canvas>
+                                            </div>
+                                            <p class="chart-empty mb-0" x-show="!chartData.categories.length">{{ t('chart_empty_category') }}</p>
+                                        </article>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <article class="chart-card h-100">
+                                            <h3 class="chart-title">{{ t('bar_by_month') }}</h3>
+                                            <div class="chart-wrap">
+                                                <canvas id="monthlyBarChart"></canvas>
+                                            </div>
+                                            <p class="chart-empty mb-0" x-show="!chartData.months.length">{{ t('chart_empty_month') }}</p>
+                                        </article>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <article class="chart-card h-100">
+                                            <h3 class="chart-title">{{ t('spending_trend') }}</h3>
+                                            <div class="chart-wrap">
+                                                <canvas id="trendLineChart"></canvas>
+                                            </div>
+                                            <p class="chart-empty mb-0" x-show="!chartData.trend.length">{{ t('chart_empty_trend') }}</p>
+                                        </article>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="col-xl-8">
+                        <div class="card app-card hover-lift h-100">
+                            <div class="card-body p-4">
+                                <h2 class="section-title mb-3">{{ t('expenses') }}</h2>
+                                {% if expenses %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Category</th>
+                                                <th>Amount</th>
+                                                <th>Date</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for expense in expenses %}
+                                            <tr>
+                                                <td>{{ expense.category }}</td>
+                                                <td class="fw-semibold">$ {{ expense.amount }}</td>
+                                                <td>{{ expense.expense_date }}</td>
+                                                <td>
+                                                    <form method="post" action="{{ url_for('main.delete_expense', expense_id=expense.id) }}" class="d-inline">
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                            Delete
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <p class="empty-state mb-0">{{ t('no_expenses_view') }}</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="col-xl-4">
+                        <div class="card app-card hover-lift h-100">
+                            <div class="card-body p-4">
+                                <h2 class="section-title mb-3">{{ t('monthly_summary') }}</h2>
+                                <template x-if="monthlySummary.length">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm align-middle mb-0">
+                                            <thead>
+                                                <tr>
+                                                    <th>Month</th>
+                                                    <th>Count</th>
+                                                    <th>Total</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <template x-for="row in monthlySummary" :key="row.month">
+                                                    <tr>
+                                                        <td x-text="row.month"></td>
+                                                        <td x-text="row.count"></td>
+                                                        <td x-text="formatMoney(row.total)"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+                                <p class="empty-state mb-0" x-show="!monthlySummary.length">{{ t('monthly_empty') }}</p>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addExpenseModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content app-modal">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title">{{ t('add_expense_modal') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-3">
+                    <form @submit.prevent="submitExpense()" class="d-grid gap-3">
+                        <div>
+                            <label for="modal_name" class="form-label">{{ t('name') }}</label>
+                            <input id="modal_name" class="form-control" type="text" x-model="form.name" required>
+                        </div>
+                        <div>
+                            <label for="modal_amount" class="form-label">{{ t('amount') }} (<span x-text="currencyCode"></span>)</label>
+                            <input id="modal_amount" class="form-control" type="number" step="0.01" min="0.01" x-model="form.amount" required>
+                        </div>
+                        <div>
+                            <label for="modal_category" class="form-label">{{ t('category') }}</label>
+                            <input id="modal_category" class="form-control" type="text" x-model="form.category" required>
+                        </div>
+                        <div>
+                            <label for="modal_date" class="form-label">{{ t('date') }}</label>
+                            <input id="modal_date" class="form-control" type="date" x-model="form.expense_date">
+                        </div>
+                        <button type="submit" class="btn btn-dark w-100" :disabled="loading.add">
+                            <span x-show="!loading.add">{{ t('add_expense') }}</span>
+                            <span x-show="loading.add" class="d-inline-flex align-items-center">
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                {{ t('saving') }}
+                            </span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="deleteExpenseModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content app-modal">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title">{{ t('delete_expense_modal') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-3">
+                    <p class="mb-3">
+                        Delete
+                        <strong x-text="pendingDelete ? pendingDelete.name : ''"></strong>
+                        for
+                        <strong x-text="pendingDelete ? formatMoney(pendingDelete.amount) : ''"></strong>?
+                    </p>
+                    <div class="d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t('cancel') }}</button>
+                        <button type="button" class="btn btn-danger" @click="confirmDelete()" :disabled="loading.delete">
+                            <span x-show="!loading.delete">{{ t('delete') }}</span>
+                            <span x-show="loading.delete" class="d-inline-flex align-items-center">
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                {{ t('deleting') }}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    function expenseDashboard(config) {
+        return {
+            filters: {
+                category: config.initialCategory || "",
+                month: config.initialMonth || "",
+            },
+            form: {
+                name: "",
+                amount: "",
+                category: "",
+                expense_date: config.today,
+            },
+            categories: [],
+            expenses: [],
+            monthlySummary: [],
+            totals: { filtered: 0, overall: 0 },
+            chartData: { categories: [], months: [], trend: [] },
+            pagination: {
+                limit: 20,
+                offset: 0,
+                nextOffset: 0,
+                total: 0,
+                hasMore: false,
+            },
+            currencyCode: config.initialCurrencyCode,
+            currencySymbol: config.initialCurrencySymbol,
+            loading: {
+                dashboard: false,
+                add: false,
+                delete: false,
+                more: false,
+            },
+            toasts: [],
+            nextToastId: 1,
+            pendingDelete: null,
+            addModal: null,
+            deleteModal: null,
+            lazyObserver: null,
+            charts: {
+                pie: null,
+                bar: null,
+                line: null,
+            },
+
+            init() {
+                this.addModal = new bootstrap.Modal(document.getElementById("addExpenseModal"));
+                this.deleteModal = new bootstrap.Modal(document.getElementById("deleteExpenseModal"));
+                const flashNodes = document.querySelectorAll(".flash-stack .alert");
+                flashNodes.forEach((node) => {
+                    const message = node.textContent.trim();
+                    if (!message) return;
+                    const isSuccess = node.classList.contains("alert-success");
+                    this.pushToast(message, isSuccess ? "success" : "error");
+                });
+                const flashStack = document.querySelector(".flash-stack");
+                if (flashStack) flashStack.style.display = "none";
+                this.applyPayload(config.initialPayload);
+                this.renderCharts();
+                this.$nextTick(() => this.setupLazyLoading());
+            },
+
+            setupLazyLoading() {
+                if (!this.lazyObserver) {
+                    this.lazyObserver = new IntersectionObserver(
+                        (entries) => {
+                            const entry = entries[0];
+                            if (!entry || !entry.isIntersecting) return;
+                            if (this.loading.more || this.loading.dashboard || !this.pagination.hasMore) return;
+                            this.loadMore();
+                        },
+                        { rootMargin: "220px 0px" }
+                    );
+                }
+
+                this.lazyObserver.disconnect();
+                if (this.$refs.lazySentinel && this.pagination.hasMore) {
+                    this.lazyObserver.observe(this.$refs.lazySentinel);
+                }
+            },
+
+            applyPayload(payload, { append = false } = {}) {
+                this.categories = payload.categories || [];
+                const nextExpenses = payload.expenses || [];
+                this.expenses = append ? this.expenses.concat(nextExpenses) : nextExpenses;
+                this.monthlySummary = payload.monthly_summary || [];
+                this.totals = payload.totals || { filtered: 0, overall: 0 };
+                this.chartData = payload.chart_data || { categories: [], months: [], trend: [] };
+                if (payload.pagination) {
+                    this.pagination.limit = payload.pagination.limit ?? this.pagination.limit;
+                    this.pagination.offset = payload.pagination.offset ?? this.pagination.offset;
+                    this.pagination.nextOffset = payload.pagination.next_offset ?? this.expenses.length;
+                    this.pagination.total = payload.pagination.total ?? this.expenses.length;
+                    this.pagination.hasMore = Boolean(payload.pagination.has_more);
+                }
+                if (payload.currency) {
+                    this.currencyCode = payload.currency.code || this.currencyCode;
+                    this.currencySymbol = payload.currency.symbol || this.currencySymbol;
+                }
+
+                this.$nextTick(() => this.setupLazyLoading());
+            },
+
+            formatMoney(value) {
+                return `${this.currencySymbol}${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            },
+
+            pushToast(message, type = "success") {
+                const id = this.nextToastId++;
+                this.toasts.push({ id, message, type });
+                window.setTimeout(() => this.dismissToast(id), 3200);
+            },
+
+            dismissToast(id) {
+                this.toasts = this.toasts.filter((toast) => toast.id !== id);
+            },
+
+            openAddModal() {
+                this.resetForm();
+                this.addModal.show();
+            },
+
+            resetForm() {
+                this.form = {
+                    name: "",
+                    amount: "",
+                    category: "",
+                    expense_date: config.today,
+                };
+            },
+
+            openDeleteModal(expense) {
+                this.pendingDelete = expense;
+                this.deleteModal.show();
+            },
+
+            async fetchDashboard() {
+                this.loading.dashboard = true;
+                try {
+                    const params = new URLSearchParams();
+                    if (this.filters.category) params.set("category", this.filters.category);
+                    if (this.filters.month) params.set("month", this.filters.month);
+                    params.set("limit", String(this.pagination.limit));
+                    params.set("offset", "0");
+
+                    const response = await fetch(`/api/dashboard?${params.toString()}`);
+                    if (!response.ok) throw new Error("Failed to refresh dashboard.");
+
+                    const payload = await response.json();
+                    this.applyPayload(payload);
+                    this.renderCharts();
+                } catch (_error) {
+                    this.pushToast("Could not refresh dashboard.", "error");
+                } finally {
+                    this.loading.dashboard = false;
+                }
+            },
+
+            async loadMore() {
+                if (this.loading.more || !this.pagination.hasMore) return;
+
+                this.loading.more = true;
+                try {
+                    const params = new URLSearchParams();
+                    if (this.filters.category) params.set("category", this.filters.category);
+                    if (this.filters.month) params.set("month", this.filters.month);
+                    params.set("limit", String(this.pagination.limit));
+                    params.set("offset", String(this.pagination.nextOffset));
+
+                    const response = await fetch(`/api/expenses?${params.toString()}`);
+                    if (!response.ok) throw new Error("Could not load more expenses.");
+                    const payload = await response.json();
+                    if (!payload.ok) throw new Error("Could not load more expenses.");
+
+                    this.applyPayload(
+                        {
+                            expenses: payload.expenses || [],
+                            pagination: payload.pagination || {},
+                            currency: payload.currency || {},
+                            categories: this.categories,
+                            monthly_summary: this.monthlySummary,
+                            totals: this.totals,
+                            chart_data: this.chartData,
+                        },
+                        { append: true }
+                    );
+                } catch (_error) {
+                    this.pushToast("Could not load more expenses.", "error");
+                } finally {
+                    this.loading.more = false;
+                }
+            },
+
+            async applyFilters() {
+                await this.fetchDashboard();
+            },
+
+            async clearFilters() {
+                this.filters.category = "";
+                this.filters.month = "";
+                await this.fetchDashboard();
+            },
+
+            async submitExpense() {
+                this.loading.add = true;
+                try {
+                    const response = await fetch("/api/expenses", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(this.form),
+                    });
+                    const payload = await response.json();
+
+                    if (!response.ok || !payload.ok) {
+                        throw new Error(payload.message || "Could not save expense.");
+                    }
+
+                    this.addModal.hide();
+                    this.pushToast(payload.message || "Expense saved.", "success");
+                    await this.fetchDashboard();
+                } catch (error) {
+                    this.pushToast(error.message || "Could not save expense.", "error");
+                } finally {
+                    this.loading.add = false;
+                }
+            },
+
+            async confirmDelete() {
+                if (!this.pendingDelete) return;
+
+                this.loading.delete = true;
+                try {
+                    const response = await fetch(`/api/expenses/${this.pendingDelete.id}`, {
+                        method: "DELETE",
+                    });
+                    const payload = await response.json();
+                    if (!response.ok || !payload.ok) {
+                        throw new Error(payload.message || "Could not delete expense.");
+                    }
+
+                    this.deleteModal.hide();
+                    this.pendingDelete = null;
+                    this.pushToast(payload.message || "Expense deleted.", "success");
+                    await this.fetchDashboard();
+                } catch (error) {
+                    this.pushToast(error.message || "Could not delete expense.", "error");
+                } finally {
+                    this.loading.delete = false;
+                }
+            },
+
+            destroyCharts() {
+                if (this.charts.pie) this.charts.pie.destroy();
+                if (this.charts.bar) this.charts.bar.destroy();
+                if (this.charts.line) this.charts.line.destroy();
+                this.charts = { pie: null, bar: null, line: null };
+            },
+
+            renderCharts() {
+                this.destroyCharts();
+
+                const categoryLabels = this.chartData.categories.map((item) => item.category);
+                const categoryTotals = this.chartData.categories.map((item) => Number(item.total));
+                if (categoryTotals.length > 0) {
+                    this.charts.pie = new Chart(document.getElementById("categoryPieChart"), {
+                        type: "pie",
+                        data: {
+                            labels: categoryLabels,
+                            datasets: [{
+                                data: categoryTotals,
+                                backgroundColor: [
+                                    "#0A7F6F", "#F2A541", "#2A9D8F", "#E76F51", "#264653",
+                                    "#C76D3B", "#5A7FDB", "#7E8D85", "#9D4EDD", "#E63946"
+                                ].slice(0, categoryTotals.length),
+                                borderWidth: 1,
+                            }],
+                        },
+                        options: {
+                            plugins: {
+                                legend: { position: "bottom" },
+                                tooltip: {
+                                    callbacks: {
+                                        label: (ctx) => `${ctx.label}: ${this.formatMoney(ctx.parsed)}`,
+                                    },
+                                },
+                            },
+                        },
+                    });
+                }
+
+                const monthLabels = this.chartData.months.map((item) => item.month);
+                const monthTotals = this.chartData.months.map((item) => Number(item.total));
+                if (monthTotals.length > 0) {
+                    this.charts.bar = new Chart(document.getElementById("monthlyBarChart"), {
+                        type: "bar",
+                        data: {
+                            labels: monthLabels,
+                            datasets: [{
+                                label: "Monthly Spend",
+                                data: monthTotals,
+                                backgroundColor: "#0A7F6F",
+                            }],
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    ticks: {
+                                        callback: (value) => this.formatMoney(value),
+                                    },
+                                },
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: (ctx) => this.formatMoney(ctx.parsed.y),
+                                    },
+                                },
+                            },
+                        },
+                    });
+                }
+
+                const trendLabels = this.chartData.trend.map((item) => item.day);
+                const trendTotals = this.chartData.trend.map((item) => Number(item.total));
+                if (trendTotals.length > 0) {
+                    this.charts.line = new Chart(document.getElementById("trendLineChart"), {
+                        type: "line",
+                        data: {
+                            labels: trendLabels,
+                            datasets: [{
+                                label: "Daily Spend Trend",
+                                data: trendTotals,
+                                borderColor: "#E76F51",
+                                backgroundColor: "rgba(231,111,81,0.18)",
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                            }],
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    ticks: {
+                                        callback: (value) => this.formatMoney(value),
+                                    },
+                                },
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: (ctx) => this.formatMoney(ctx.parsed.y),
+                                    },
+                                },
+                            },
+                        },
+                    });
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

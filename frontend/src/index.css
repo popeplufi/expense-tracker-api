@@ -1,0 +1,21 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-body antialiased;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-3xl border border-slate-200/70 bg-white/75 p-5 shadow-soft backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-900/70;
+  }
+
+  .nav-chip {
+    @apply rounded-full px-4 py-2 text-sm font-medium transition;
+  }
+}

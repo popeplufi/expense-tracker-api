@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('profile') }} - Expense Tracker Pro{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-xl-8">
+        <section class="card app-card hover-lift">
+            <div class="card-body p-4 p-lg-5">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-4">
+                    <div>
+                        <h2 class="section-title mb-1">{{ t('profile') }}</h2>
+                        <p class="mb-0 text-secondary">@{{ g.user.username }}</p>
+                    </div>
+                    <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">{{ t('back_dashboard') }}</a>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6 col-lg-3">
+                        <div class="metric-card h-100">
+                            <p class="metric-label mb-1">{{ t('total_expenses') }}</p>
+                            <p class="metric-value mb-0">{{ stats.expense_count }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <div class="metric-card h-100">
+                            <p class="metric-label mb-1">{{ t('total_spent') }}</p>
+                            <p class="metric-value mb-0">{{ current_currency_symbol }}{{ "{:,.2f}".format(stats.total_spent) }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <div class="metric-card h-100">
+                            <p class="metric-label mb-1">{{ t('first_expense') }}</p>
+                            <p class="metric-value mb-0">{{ stats.first_expense_date or "-" }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <div class="metric-card h-100">
+                            <p class="metric-label mb-1">{{ t('latest_expense') }}</p>
+                            <p class="metric-value mb-0">{{ stats.latest_expense_date or "-" }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <p class="metric-label mb-1">{{ t('top_category') }}</p>
+                    {% if stats.top_category %}
+                        <p class="metric-value mb-0">
+                            {{ stats.top_category.category }} - {{ current_currency_symbol }}{{ "{:,.2f}".format(stats.top_category.total) }}
+                        </p>
+                    {% else %}
+                        <p class="mb-0 text-secondary">{{ t('no_expenses_yet') }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

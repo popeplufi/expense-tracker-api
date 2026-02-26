@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card shadow-sm p-4">
+                <h6 class="text-muted">Total Expenses</h6>
+                <h3 class="fw-bold">$ {{ total }}</h3>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card shadow-sm p-4">
+                <h6 class="text-muted">This Month</h6>
+                <h3 class="fw-bold">$ {{ monthly_total }}</h3>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card shadow-sm p-4">
+                <h6 class="text-muted">Transactions</h6>
+                <h3 class="fw-bold">{{ expenses|length }}</h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm p-4 mb-4">
+        <h5 class="mb-4">Spending Overview</h5>
+        <canvas id="expenseChart"></canvas>
+    </div>
+
+    <div class="card shadow-sm p-4">
+        <h5 class="mb-4">Expenses</h5>
+        {% if expenses %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Category</th>
+                        <th>Amount</th>
+                        <th>Date</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for expense in expenses %}
+                    <tr>
+                        <td>{{ expense.category }}</td>
+                        <td class="fw-semibold">$ {{ expense.amount }}</td>
+                        <td>{{ expense.expense_date or expense.date }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('main.delete_expense', expense_id=expense.id) }}" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No expenses recorded.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const ctx = document.getElementById('expenseChart');
+
+new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+        labels: {{ labels|tojson }},
+        datasets: [{
+            data: {{ values|tojson }},
+            backgroundColor: [
+                '#111',
+                '#333',
+                '#555',
+                '#777',
+                '#999'
+            ],
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        }
+    }
+});
+</script>
+{% endblock %}

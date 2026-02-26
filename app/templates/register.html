@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Register - Expense Tracker Pro{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-5">
+        <section class="card app-card hover-lift">
+            <div class="card-body p-4 p-lg-5">
+                <h2 class="section-title mb-3">{{ t('register') }}</h2>
+                <form method="post" action="{{ url_for('main.register') }}" class="d-grid gap-3">
+                    <div>
+                        <label for="username" class="form-label">{{ t('username') }}</label>
+                        <input id="username" class="form-control form-control-lg" type="text" name="username" minlength="3" required autofocus>
+                    </div>
+                    <div>
+                        <label for="password" class="form-label">{{ t('password') }}</label>
+                        <input id="password" class="form-control form-control-lg" type="password" name="password" minlength="6" required>
+                    </div>
+                    <div>
+                        <label for="confirm_password" class="form-label">{{ t('confirm_password') }}</label>
+                        <input id="confirm_password" class="form-control form-control-lg" type="password" name="confirm_password" minlength="6" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg">{{ t('register') }}</button>
+                </form>
+                <p class="auth-note mt-3 mb-0">
+                    {{ t('already_have') }} <a href="{{ url_for('main.login') }}">{{ t('login') }}</a>.
+                </p>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

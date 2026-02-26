@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SECRET_KEY: change-this-before-production
+      DATABASE_PATH: /data/expenses.db
+      PORT: "8000"
+    volumes:
+      - expense_data:/data
+    restart: unless-stopped
+
+volumes:
+  expense_data:
