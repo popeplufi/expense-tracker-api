@@ -475,6 +475,11 @@ def dashboard():
     )
 
 
+@bp.get("/frontend")
+def frontend():
+    return render_template("frontend.html")
+
+
 @bp.post("/expenses")
 @login_required
 def create_expense():
