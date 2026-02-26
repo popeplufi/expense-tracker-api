@@ -19,7 +19,7 @@ from flask_login import current_user, login_user, logout_user
 from jwt import ExpiredSignatureError, InvalidTokenError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import db, repository
+from . import repository
 from .i18n import (
     CURRENCY_OPTIONS,
     DEFAULT_CURRENCY,
@@ -31,7 +31,7 @@ from .i18n import (
     normalize_language,
     normalize_timezone,
 )
-from .models import User
+from .session_user import SessionUser
 from .services import claim_legacy_expenses_for_user
 
 bp = Blueprint("main", __name__)
@@ -303,15 +303,12 @@ def register():
         if confirm_password and password_raw != confirm_password:
             flash("Passwords do not match.", "error")
             return render_template("register.html")
-        if User.query.filter_by(username=username).first():
+        if repository.get_user_by_username(username):
             flash("Username is already taken.", "error")
             return render_template("register.html")
 
         password = generate_password_hash(password_raw)
-        new_user = User(username=username, password=password)
-        db.session.add(new_user)
-        db.session.commit()
-        user_id = new_user.id
+        user_id = repository.create_user(username, password)
 
         if repository.count_users() == 1:
             claimed = claim_legacy_expenses_for_user(user_id)
@@ -330,11 +327,11 @@ def login():
         return redirect(url_for("main.dashboard"))
 
     if request.method == "POST":
-        user = User.query.filter_by(username=request.form["username"].strip()).first()
+        user = repository.get_user_by_username(request.form["username"].strip())
 
-        if user and check_password_hash(user.password, request.form["password"]):
-            login_user(user)
-            session["user_id"] = user.id
+        if user and check_password_hash(user["password_hash"], request.form["password"]):
+            login_user(SessionUser(user["id"], user["username"]))
+            session["user_id"] = user["id"]
             flash("Welcome back.", "success")
             return redirect(url_for("main.dashboard"))
 

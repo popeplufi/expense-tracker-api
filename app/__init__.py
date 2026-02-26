@@ -25,9 +25,18 @@ login_manager = LoginManager()
 
 @login_manager.user_loader
 def load_user(user_id):
-    from .models import User
+    from . import repository
+    from .session_user import SessionUser
 
-    return User.query.get(int(user_id))
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return None
+
+    user = repository.get_user_by_id(user_id_int)
+    if not user:
+        return None
+    return SessionUser(user["id"], user["username"])
 
 
 def create_app(test_config=None):
