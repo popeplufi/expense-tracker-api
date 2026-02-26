@@ -13,15 +13,6 @@
 
 <hr>
 
-<h3>Add Expense</h3>
-
-<input type="text" id="category" placeholder="Category">
-<input type="number" id="amount" placeholder="Amount">
-<input type="date" id="date">
-<button onclick="addExpense()">Add Expense</button>
-
-<hr>
-
 <button onclick="getExpenses()">Load Expenses</button>
 
 <pre id="output"></pre>
@@ -55,26 +46,6 @@ async function getExpenses() {
         headers: {
             "Authorization": "Bearer " + token
         }
-    });
-
-    const data = await response.json();
-
-    document.getElementById("output").textContent =
-        JSON.stringify(data, null, 2);
-}
-
-async function addExpense() {
-    const response = await fetch("/api/expenses", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + token
-        },
-        body: JSON.stringify({
-            category: document.getElementById("category").value,
-            amount: parseFloat(document.getElementById("amount").value),
-            date: document.getElementById("date").value
-        })
     });
 
     const data = await response.json();

@@ -3,12 +3,6 @@ from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 import jwt
-from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,
-    get_jwt_identity,
-    jwt_required,
-)
 from flask import (
     Blueprint,
     current_app,
@@ -37,7 +31,7 @@ from .i18n import (
     normalize_language,
     normalize_timezone,
 )
-from .models import Expense, User
+from .models import User
 from .services import claim_legacy_expenses_for_user
 
 bp = Blueprint("main", __name__)
@@ -358,7 +352,6 @@ def logout():
 
 
 @bp.post("/api/auth/register")
-@bp.post("/api/register")
 def api_register():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
@@ -369,7 +362,7 @@ def api_register():
         return jsonify({"ok": False, "message": "Username must be at least 3 characters."}), 400
     if len(password) < 6:
         return jsonify({"ok": False, "message": "Password must be at least 6 characters."}), 400
-    if confirm_password and password != confirm_password:
+    if password != confirm_password:
         return jsonify({"ok": False, "message": "Passwords do not match."}), 400
     if repository.get_user_by_username(username):
         return jsonify({"ok": False, "message": "Username is already taken."}), 409
@@ -396,7 +389,6 @@ def api_register():
 
 
 @bp.post("/api/auth/login")
-@bp.post("/api/login")
 def api_login():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
@@ -405,21 +397,19 @@ def api_login():
     if not username or not password:
         return jsonify({"ok": False, "message": "Username and password are required."}), 400
 
-    user = User.query.filter_by(username=username).first()
-    if not user or not check_password_hash(user.password, password):
-        return jsonify({"message": "Invalid credentials"}), 401
+    user = repository.get_user_by_username(username)
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"ok": False, "message": "Invalid username or password."}), 401
 
-    access_token = create_access_token(identity=user.id)
-    refresh_token = create_refresh_token(identity=user.id)
-    return jsonify({"access_token": access_token, "refresh_token": refresh_token})
-
-
-@bp.post("/api/refresh")
-@jwt_required(refresh=True)
-def refresh():
-    user_id = get_jwt_identity()
-    new_access_token = create_access_token(identity=user_id)
-    return jsonify({"access_token": new_access_token})
+    token = _create_jwt(user["id"])
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Login successful.",
+            "token": token,
+            "user": _api_user_payload(user),
+        }
+    )
 
 
 @bp.get("/api/auth/me")
@@ -441,19 +431,29 @@ def profile():
 
 
 @bp.get("/")
+@bp.get("/dashboard")
 @login_required
 def dashboard():
-    expenses_records = Expense.query.filter_by(user_id=current_user.id).all()
-    expenses = []
-    for record in expenses_records:
-        expenses.append(
-            {
-                "id": record.id,
-                "category": record.category or "Uncategorized",
-                "amount": float(record.amount or 0),
-                "expense_date": record.date,
-            }
-        )
+    selected_category = request.args.get("category", "").strip()
+    selected_month = request.args.get("month", "").strip()
+    category_filter = selected_category or None
+    month_filter = selected_month or None
+
+    dashboard = _dashboard_payload(
+        user_id=g.user["id"],
+        category_filter=category_filter,
+        month_filter=month_filter,
+        currency_code=g.currency,
+        limit=PAGE_SIZE_DEFAULT,
+        offset=0,
+    )
+    current_month = date.today().strftime("%Y-%m")
+    monthly_total = 0
+    for row in dashboard["monthly_summary"]:
+        if row.get("month") == current_month:
+            monthly_total = row.get("total", 0)
+            break
+    expenses = dashboard["expenses"]
 
     category_data = defaultdict(float)
     for expense in expenses:
@@ -461,16 +461,7 @@ def dashboard():
 
     labels = list(category_data.keys())
     values = list(category_data.values())
-    total = round(sum(values), 2)
-    current_month = date.today().strftime("%Y-%m")
-    monthly_total = round(
-        sum(
-            expense["amount"]
-            for expense in expenses
-            if str(expense.get("expense_date") or "").startswith(current_month)
-        ),
-        2,
-    )
+    total = dashboard["totals"]["overall"]
 
     return render_template(
         "dashboard.html",
@@ -480,17 +471,6 @@ def dashboard():
         labels=labels,
         values=values,
     )
-
-
-@bp.get("/dashboard")
-@login_required
-def dashboard_alias():
-    return redirect(url_for("main.dashboard"))
-
-
-@bp.route("/frontend")
-def frontend():
-    return render_template("frontend.html")
 
 
 @bp.post("/expenses")
@@ -524,16 +504,13 @@ def create_expense():
     else:
         expense_date = date.today().isoformat()
 
-    amount = convert_to_ngn(amount_input, g.currency)
-    new_expense = Expense(
+    repository.add_expense(
+        user_id=g.user["id"],
         name=name,
+        amount=convert_to_ngn(amount_input, g.currency),
         category=category,
-        amount=amount,
-        date=expense_date,
-        user_id=current_user.id,
+        expense_date=expense_date,
     )
-    db.session.add(new_expense)
-    db.session.commit()
     flash("Expense added successfully.", "success")
     return redirect(url_for("main.dashboard", success=1))
 
@@ -621,52 +598,102 @@ def api_dashboard():
     return jsonify(dashboard)
 
 
-@bp.route("/api/expenses", methods=["GET"])
-@jwt_required()
+@bp.get("/api/expenses")
+@login_required
 def api_expenses():
-    user_id = get_jwt_identity()
-    try:
-        user_id = int(user_id)
-    except (TypeError, ValueError):
-        return jsonify({"message": "Invalid token identity"}), 401
+    selected_category = request.args.get("category", "").strip()
+    selected_month = request.args.get("month", "").strip()
+    category_filter = selected_category or None
+    month_filter = selected_month or None
+    limit = _parse_int(
+        request.args.get("limit"), PAGE_SIZE_DEFAULT, minimum=1, maximum=PAGE_SIZE_MAX
+    )
+    offset = _parse_int(request.args.get("offset"), 0, minimum=0)
+    currency = normalize_currency(g.currency)
 
-    expenses = Expense.query.filter_by(user_id=user_id).all()
-    result = [
+    expenses_raw = repository.list_expenses(
+        user_id=g.user["id"],
+        category=category_filter,
+        month=month_filter,
+        limit=limit,
+        offset=offset,
+    )
+    total_matching = repository.count_expenses(
+        user_id=g.user["id"], category=category_filter, month=month_filter
+    )
+
+    expenses = []
+    for expense in expenses_raw:
+        item = dict(expense)
+        item["amount"] = _amount_for_currency(item["amount"], currency)
+        expenses.append(item)
+
+    simple = str(request.args.get("simple", "")).strip().lower()
+    if simple in {"1", "true", "yes"}:
+        return jsonify(expenses)
+
+    return jsonify(
         {
-            "id": expense.id,
-            "category": expense.category,
-            "amount": expense.amount,
-            "date": expense.date,
+            "ok": True,
+            "expenses": expenses,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "returned": len(expenses),
+                "total": total_matching,
+                "next_offset": offset + len(expenses),
+                "has_more": (offset + len(expenses)) < total_matching,
+            },
+            "currency": {
+                "code": currency,
+                "symbol": CURRENCY_OPTIONS[currency]["symbol"],
+            },
         }
-        for expense in expenses
-    ]
-    return jsonify(result)
+    )
 
 
 @bp.post("/api/expenses")
-@jwt_required()
-def add_expense():
-    user_id = get_jwt_identity()
-    data = request.get_json(silent=True) or {}
+@login_required
+def api_create_expense():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    amount_raw = str(payload.get("amount", "")).strip()
+    category = str(payload.get("category", "")).strip() or "Uncategorized"
+    expense_date_raw = str(payload.get("expense_date", "")).strip()
+
+    if not name:
+        return jsonify({"ok": False, "message": "Expense name is required."}), 400
 
     try:
-        user_id = int(user_id)
-    except (TypeError, ValueError):
-        return jsonify({"message": "Invalid token identity"}), 401
+        amount_input = float(amount_raw)
+    except ValueError:
+        return jsonify({"ok": False, "message": "Amount must be a number."}), 400
 
-    try:
-        new_expense = Expense(
-            category=data["category"],
-            amount=float(data["amount"]),
-            date=data["date"],
-            user_id=user_id,
-        )
-    except (KeyError, TypeError, ValueError):
-        return jsonify({"message": "category, amount, and date are required"}), 400
+    if amount_input <= 0:
+        return jsonify({"ok": False, "message": "Amount must be greater than zero."}), 400
 
-    db.session.add(new_expense)
-    db.session.commit()
-    return jsonify({"message": "Expense added successfully"})
+    if expense_date_raw:
+        try:
+            expense_date = date.fromisoformat(expense_date_raw).isoformat()
+        except ValueError:
+            return jsonify({"ok": False, "message": "Date must be in YYYY-MM-DD format."}), 400
+    else:
+        expense_date = date.today().isoformat()
+
+    expense_id = repository.add_expense(
+        user_id=g.user["id"],
+        name=name,
+        amount=convert_to_ngn(amount_input, g.currency),
+        category=category,
+        expense_date=expense_date,
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Expense added successfully.",
+            "expense_id": expense_id,
+        }
+    )
 
 
 @bp.delete("/api/expenses/<int:expense_id>")

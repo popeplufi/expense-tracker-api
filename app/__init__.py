@@ -1,9 +1,7 @@
 import os
-from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask, g, request
-from flask_jwt_extended import JWTManager
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 
@@ -23,7 +21,6 @@ from .services import migrate_json_if_needed
 
 db = SQLAlchemy()
 login_manager = LoginManager()
-jwt = JWTManager()
 
 
 @login_manager.user_loader
@@ -37,24 +34,21 @@ def create_app(test_config=None):
     app = Flask(__name__)
 
     project_root = Path(app.root_path).parent
-    database_url = os.environ.get("DATABASE_URL", "").strip()
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
     database_path = os.path.expanduser(
         os.environ.get("DATABASE_PATH", str(project_root / "expenses.db"))
     )
-    runtime_secret = (
-        os.environ.get("SECRET_KEY")
-        or os.environ.get("JWT_SECRET_KEY")
-        or os.urandom(32).hex()
-    )
     app.config.update(
-        SECRET_KEY=runtime_secret,
-        JWT_SECRET_KEY=os.environ.get("JWT_SECRET_KEY") or runtime_secret,
-        JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=15),
-        JWT_REFRESH_TOKEN_EXPIRES=timedelta(days=7),
+        SECRET_KEY=os.environ.get("SECRET_KEY", "change-this-in-production"),
+        JWT_SECRET_KEY=os.environ.get(
+            "JWT_SECRET_KEY", os.environ.get("SECRET_KEY", "change-this-in-production")
+        ),
         JWT_EXPIRES_MINUTES=os.environ.get("JWT_EXPIRES_MINUTES", "10080"),
         DATABASE=database_path,
-        DATABASE_URL=database_url,
-        SQLALCHEMY_DATABASE_URI=f"sqlite:///{database_path}",
+        SQLALCHEMY_DATABASE_URI=database_url or "sqlite:///app.db",
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         JSON_IMPORT_PATH=os.environ.get(
             "JSON_IMPORT_PATH", str(project_root / "expenses.json")
@@ -82,7 +76,6 @@ def create_app(test_config=None):
     init_app(app)
     db.init_app(app)
     login_manager.init_app(app)
-    jwt.init_app(app)
     login_manager.login_view = "main.login"
 
     @app.context_processor
