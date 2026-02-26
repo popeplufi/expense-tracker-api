@@ -352,6 +352,7 @@ def logout():
 
 
 @bp.post("/api/auth/register")
+@bp.post("/api/register")
 def api_register():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
@@ -362,7 +363,7 @@ def api_register():
         return jsonify({"ok": False, "message": "Username must be at least 3 characters."}), 400
     if len(password) < 6:
         return jsonify({"ok": False, "message": "Password must be at least 6 characters."}), 400
-    if password != confirm_password:
+    if confirm_password and password != confirm_password:
         return jsonify({"ok": False, "message": "Passwords do not match."}), 400
     if repository.get_user_by_username(username):
         return jsonify({"ok": False, "message": "Username is already taken."}), 409
@@ -389,6 +390,7 @@ def api_register():
 
 
 @bp.post("/api/auth/login")
+@bp.post("/api/login")
 def api_login():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()

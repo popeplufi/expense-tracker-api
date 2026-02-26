@@ -38,14 +38,16 @@ def create_app(test_config=None):
     if database_url:
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
+    generated_secret = os.urandom(32).hex()
+    configured_secret = os.environ.get("SECRET_KEY")
+    configured_jwt_secret = os.environ.get("JWT_SECRET_KEY")
+    runtime_secret = configured_secret or configured_jwt_secret or generated_secret
     database_path = os.path.expanduser(
         os.environ.get("DATABASE_PATH", str(project_root / "expenses.db"))
     )
     app.config.update(
-        SECRET_KEY=os.environ.get("SECRET_KEY", "change-this-in-production"),
-        JWT_SECRET_KEY=os.environ.get(
-            "JWT_SECRET_KEY", os.environ.get("SECRET_KEY", "change-this-in-production")
-        ),
+        SECRET_KEY=runtime_secret,
+        JWT_SECRET_KEY=configured_jwt_secret or runtime_secret,
         JWT_EXPIRES_MINUTES=os.environ.get("JWT_EXPIRES_MINUTES", "10080"),
         DATABASE=database_path,
         SQLALCHEMY_DATABASE_URI=database_url or "sqlite:///app.db",

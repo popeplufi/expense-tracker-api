@@ -52,9 +52,19 @@ def _ensure_expense_user_column(db):
     )
 
 
+def _ensure_user_columns(db):
+    columns = db.execute("PRAGMA table_info(users)").fetchall()
+    existing_columns = {column["name"] for column in columns}
+    if "created_at" not in existing_columns:
+        db.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+    db.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username)")
+
+
 def init_db():
     db = get_db()
     db.executescript(SCHEMA_SQL)
+    _ensure_user_columns(db)
     _ensure_expense_user_column(db)
     db.commit()
 
