@@ -37,18 +37,23 @@ def create_app(test_config=None):
     app = Flask(__name__)
 
     project_root = Path(app.root_path).parent
+    database_url = os.environ.get("DATABASE_URL", "").strip()
     database_path = os.path.expanduser(
         os.environ.get("DATABASE_PATH", str(project_root / "expenses.db"))
     )
+    runtime_secret = (
+        os.environ.get("SECRET_KEY")
+        or os.environ.get("JWT_SECRET_KEY")
+        or os.urandom(32).hex()
+    )
     app.config.update(
-        SECRET_KEY=os.environ.get("SECRET_KEY", "change-this-in-production"),
-        JWT_SECRET_KEY=os.environ.get(
-            "JWT_SECRET_KEY", "super-secret-key-change-this"
-        ),
+        SECRET_KEY=runtime_secret,
+        JWT_SECRET_KEY=os.environ.get("JWT_SECRET_KEY") or runtime_secret,
         JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=15),
         JWT_REFRESH_TOKEN_EXPIRES=timedelta(days=7),
         JWT_EXPIRES_MINUTES=os.environ.get("JWT_EXPIRES_MINUTES", "10080"),
         DATABASE=database_path,
+        DATABASE_URL=database_url,
         SQLALCHEMY_DATABASE_URI=f"sqlite:///{database_path}",
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         JSON_IMPORT_PATH=os.environ.get(

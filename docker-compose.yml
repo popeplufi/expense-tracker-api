@@ -4,7 +4,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      SECRET_KEY: change-this-before-production
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       DATABASE_PATH: /data/expenses.db
       PORT: "8000"
     volumes:
