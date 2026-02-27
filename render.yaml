@@ -4,7 +4,7 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -k gthread -w 1 --threads 8 run:app -c gunicorn.conf.py
-    healthCheckPath: /login
+    healthCheckPath: /healthz
     disks:
       - name: app-data
         mountPath: /var/data
