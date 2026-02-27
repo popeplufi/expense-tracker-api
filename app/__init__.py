@@ -62,7 +62,7 @@ def create_app(test_config=None):
         JWT_SECRET_KEY=configured_jwt_secret or runtime_secret,
         JWT_EXPIRES_MINUTES=os.environ.get("JWT_EXPIRES_MINUTES", "10080"),
         DATABASE=database_path,
-        SQLALCHEMY_DATABASE_URI=database_url or "sqlite:///app.db",
+        SQLALCHEMY_DATABASE_URI=database_url or f"sqlite:///{database_path}",
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         JSON_IMPORT_PATH=os.environ.get(
             "JSON_IMPORT_PATH", str(project_root / "expenses.json")
@@ -90,7 +90,15 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
 
-    Path(app.config["DATABASE"]).parent.mkdir(parents=True, exist_ok=True)
+    configured_db_path = Path(app.config["DATABASE"]).expanduser()
+    try:
+        configured_db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        fallback_db_path = (project_root / "expenses.db").resolve()
+        fallback_db_path.parent.mkdir(parents=True, exist_ok=True)
+        app.config["DATABASE"] = str(fallback_db_path)
+        if not database_url:
+            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{fallback_db_path}"
 
     @app.after_request
     def add_dev_cors_headers(response):
