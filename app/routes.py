@@ -53,6 +53,11 @@ ALLOWED_STATUS_EXTENSIONS = {
 }
 
 
+@bp.get("/healthz")
+def healthz():
+    return jsonify({"ok": True}), 200
+
+
 def _jwt_expiration_minutes():
     raw_minutes = current_app.config.get("JWT_EXPIRES_MINUTES", "10080")
     try:
