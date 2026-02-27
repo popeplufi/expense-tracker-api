@@ -58,3 +58,13 @@ python3 scripts/generate_vapid_keys.py
 - Admin users are configured via env:
   - `ADMIN_USERNAMES` (comma-separated usernames, default `admin`)
   - `ADMIN_USER_IDS` (comma-separated numeric IDs)
+
+## AI Bot Chat
+
+- Open AI chat at: `/chat/bot`
+- Bot account is auto-created from env config:
+  - `AI_BOT_ENABLED` (`1`/`0`)
+  - `AI_BOT_USERNAME`
+  - `AI_BOT_PASSWORD`
+- If `OPENAI_API_KEY` is set, bot uses OpenAI Responses API.
+- If `OPENAI_API_KEY` is empty, bot uses built-in fallback replies.

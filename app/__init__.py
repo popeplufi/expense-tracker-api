@@ -77,6 +77,15 @@ def create_app(test_config=None):
         VAPID_CLAIMS_SUB=os.environ.get("VAPID_CLAIMS_SUB", "mailto:admin@example.com"),
         ADMIN_USERNAMES=os.environ.get("ADMIN_USERNAMES", "admin"),
         ADMIN_USER_IDS=os.environ.get("ADMIN_USER_IDS", ""),
+        AI_BOT_USERNAME=os.environ.get("AI_BOT_USERNAME", "plufi_ai"),
+        AI_BOT_PASSWORD=os.environ.get("AI_BOT_PASSWORD", "plufi-ai-internal"),
+        AI_BOT_ENABLED=os.environ.get("AI_BOT_ENABLED", "1"),
+        AI_BOT_MODEL=os.environ.get("AI_BOT_MODEL", "gpt-4o-mini"),
+        AI_BOT_SYSTEM_PROMPT=os.environ.get(
+            "AI_BOT_SYSTEM_PROMPT",
+            "You are a concise, helpful assistant inside a chat app.",
+        ),
+        OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", ""),
     )
     if test_config:
         app.config.update(test_config)

@@ -140,6 +140,22 @@ def _request_ip():
     return (request.remote_addr or "").strip() or None
 
 
+def _ai_bot_enabled():
+    return str(current_app.config.get("AI_BOT_ENABLED", "1")).strip() == "1"
+
+
+def _ensure_ai_bot_user():
+    username = str(current_app.config.get("AI_BOT_USERNAME", "plufi_ai")).strip() or "plufi_ai"
+    existing = repository.get_user_by_username(username)
+    if existing:
+        return existing
+    password_hash = generate_password_hash(
+        str(current_app.config.get("AI_BOT_PASSWORD", "plufi-ai-internal"))
+    )
+    user_id = repository.create_user(username, password_hash, email=None)
+    return repository.get_user_by_id(user_id)
+
+
 def _configured_admin_usernames():
     raw = str(current_app.config.get("ADMIN_USERNAMES", "admin"))
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
@@ -659,6 +675,7 @@ def chat_home():
         selected_chat_id = None
 
     users = repository.list_friends(g.user["id"])
+    ai_bot = _ensure_ai_bot_user() if _ai_bot_enabled() else None
     chats = repository.list_user_chats(g.user["id"])
 
     if selected_chat_id is None and chats:
@@ -671,15 +688,22 @@ def chat_home():
 
     messages = []
     active_chat = None
+    active_chat_peer = None
     if selected_chat_id is not None:
         active_chat = repository.get_chat(selected_chat_id)
         messages = repository.list_chat_messages(selected_chat_id, limit=200)
+        for chat in chats:
+            if int(chat["id"]) == int(selected_chat_id):
+                active_chat_peer = chat.get("peer_username")
+                break
 
     return render_template(
         "chat.html",
         chats=chats,
         users=users,
+        ai_bot=ai_bot,
         active_chat=active_chat,
+        active_chat_peer=active_chat_peer,
         messages=messages,
         active_chat_id=selected_chat_id,
     )
@@ -777,6 +801,18 @@ def settings_page():
         push_dependency_available=is_push_dependency_available(),
         push_subscription_count=repository.count_push_subscriptions_for_user(g.user["id"]),
     )
+
+
+@bp.get("/chat/bot")
+@login_required
+def start_ai_bot_chat():
+    if not _ai_bot_enabled():
+        flash("AI bot is currently disabled.", "error")
+        return redirect(url_for("main.chat_home"))
+    bot = _ensure_ai_bot_user()
+    repository.ensure_friendship(g.user["id"], bot["id"])
+    chat_id = repository.get_or_create_direct_chat(g.user["id"], bot["id"])
+    return redirect(url_for("main.chat_home", chat=chat_id))
 
 
 @bp.get("/admin/login-events")

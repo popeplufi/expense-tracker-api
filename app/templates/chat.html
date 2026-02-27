@@ -48,6 +48,14 @@
 
             <h6 class="mt-4 mb-2">Start Chat</h6>
             <div class="chat-contacts" id="userList">
+                {% if ai_bot %}
+                <a
+                    href="{{ url_for('main.start_ai_bot_chat') }}"
+                    class="chat-contact-item chat-contact-item--bot"
+                >
+                    {{ ai_bot.username }} (AI)
+                </a>
+                {% endif %}
                 {% if users %}
                     {% for user in users %}
                     <a
@@ -67,9 +75,13 @@
         <section class="card chat-window whatsapp-chat-window">
             {% if active_chat %}
             <header class="chat-window__header whatsapp-chat-header">
-                <div>
+                <div class="chat-window__header-main">
                     <p class="text-secondary small mb-0">Chat</p>
                     <h5 class="mb-0">Conversation</h5>
+                </div>
+                <div class="call-actions">
+                    <button id="audioCallBtn" type="button" class="btn btn-outline-secondary btn-sm">Call</button>
+                    <button id="videoCallBtn" type="button" class="btn btn-primary btn-sm">Video</button>
                 </div>
             </header>
 
@@ -93,6 +105,31 @@
                 {% endif %}
             </div>
             <div id="typingIndicator" class="typing-indicator"></div>
+            {% if ai_bot and active_chat_peer and active_chat_peer == ai_bot.username %}
+            <section class="ai-prompt-bar">
+                <button type="button" class="btn btn-outline-secondary btn-sm ai-prompt-btn" data-prompt="Summarize the last messages and give action points.">Summarize</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm ai-prompt-btn" data-prompt="Help me write a clear reply to the conversation.">Write reply</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm ai-prompt-btn" data-prompt="Create a step-by-step plan for my goal.">Plan</button>
+            </section>
+            {% endif %}
+            <section id="callPanel" class="call-panel d-none">
+                <div class="call-panel__status" id="callStatus">Not in call</div>
+                <div class="call-panel__videos">
+                    <video id="remoteVideo" class="call-video call-video--remote" autoplay playsinline></video>
+                    <video id="localVideo" class="call-video call-video--local" autoplay playsinline muted></video>
+                </div>
+                <div class="call-panel__actions">
+                    <button id="muteCallBtn" type="button" class="btn btn-outline-secondary btn-sm">Mute</button>
+                    <button id="endCallBtn" type="button" class="btn btn-danger btn-sm">End</button>
+                </div>
+            </section>
+            <section id="incomingCallBanner" class="incoming-call-banner d-none">
+                <p id="incomingCallText" class="mb-2 fw-semibold">Incoming call...</p>
+                <div class="d-flex gap-2">
+                    <button id="acceptCallBtn" type="button" class="btn btn-primary btn-sm">Accept</button>
+                    <button id="rejectCallBtn" type="button" class="btn btn-outline-secondary btn-sm">Reject</button>
+                </div>
+            </section>
 
             <form method="post" action="{{ url_for('main.send_chat_message', chat_id=active_chat.id) }}" class="chat-window__composer whatsapp-composer" id="chatComposer">
                 <input type="text" class="form-control" name="body" placeholder="Type a message..." autocomplete="off" required>
@@ -125,10 +162,32 @@ const messageInput = composer ? composer.querySelector("input[name='body']") : n
 const userSearchInput = document.getElementById("userSearchInput");
 const userList = document.getElementById("userList");
 const typingIndicator = document.getElementById("typingIndicator");
+const audioCallBtn = document.getElementById("audioCallBtn");
+const videoCallBtn = document.getElementById("videoCallBtn");
+const endCallBtn = document.getElementById("endCallBtn");
+const muteCallBtn = document.getElementById("muteCallBtn");
+const callPanel = document.getElementById("callPanel");
+const callStatus = document.getElementById("callStatus");
+const remoteVideo = document.getElementById("remoteVideo");
+const localVideo = document.getElementById("localVideo");
+const incomingCallBanner = document.getElementById("incomingCallBanner");
+const incomingCallText = document.getElementById("incomingCallText");
+const acceptCallBtn = document.getElementById("acceptCallBtn");
+const rejectCallBtn = document.getElementById("rejectCallBtn");
+const aiPromptButtons = document.querySelectorAll(".ai-prompt-btn");
 const socket = io({ transports: ["websocket", "polling"] });
 let typingState = false;
 let typingStopTimer = null;
 let pushReady = false;
+let peerConnection = null;
+let localStream = null;
+let remoteStream = null;
+let pendingOffer = null;
+let callMode = "audio";
+let isMuted = false;
+const rtcConfig = {
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
 
 function maybeNotify(message) {
     if (!message) return;
@@ -221,6 +280,130 @@ function setTypingIndicator(text = "") {
     typingIndicator.textContent = text;
 }
 
+function setCallStatus(text) {
+    if (callStatus) {
+        callStatus.textContent = text || "";
+    }
+}
+
+function showCallPanel(show) {
+    if (!callPanel) return;
+    callPanel.classList.toggle("d-none", !show);
+}
+
+function showIncomingBanner(show, text = "Incoming call...") {
+    if (!incomingCallBanner) return;
+    if (incomingCallText) incomingCallText.textContent = text;
+    incomingCallBanner.classList.toggle("d-none", !show);
+}
+
+async function ensureLocalStream(mode) {
+    if (localStream) return localStream;
+    localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: mode === "video"
+    });
+    if (localVideo) {
+        localVideo.srcObject = localStream;
+    }
+    return localStream;
+}
+
+function stopLocalStream() {
+    if (!localStream) return;
+    localStream.getTracks().forEach((track) => track.stop());
+    localStream = null;
+    if (localVideo) localVideo.srcObject = null;
+}
+
+function cleanupPeerConnection() {
+    if (peerConnection) {
+        peerConnection.onicecandidate = null;
+        peerConnection.ontrack = null;
+        peerConnection.close();
+    }
+    peerConnection = null;
+    remoteStream = null;
+    if (remoteVideo) remoteVideo.srcObject = null;
+}
+
+async function createPeerConnection(mode) {
+    cleanupPeerConnection();
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    remoteStream = new MediaStream();
+    if (remoteVideo) {
+        remoteVideo.srcObject = remoteStream;
+    }
+
+    peerConnection.onicecandidate = (event) => {
+        if (!event.candidate || !ACTIVE_CHAT_ID) return;
+        socket.emit("call_ice_candidate", {
+            room: `conversation_${ACTIVE_CHAT_ID}`,
+            candidate: event.candidate
+        });
+    };
+
+    peerConnection.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+    };
+
+    const stream = await ensureLocalStream(mode);
+    stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+    showCallPanel(true);
+    return peerConnection;
+}
+
+async function startOutgoingCall(mode) {
+    if (!ACTIVE_CHAT_ID) return;
+    if (!navigator.mediaDevices || !window.RTCPeerConnection) {
+        alert("Calling is not supported in this browser.");
+        return;
+    }
+    callMode = mode;
+    setCallStatus(mode === "video" ? "Starting video call..." : "Starting voice call...");
+    await createPeerConnection(mode);
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit("call_offer", {
+        room: `conversation_${ACTIVE_CHAT_ID}`,
+        offer,
+        call_type: mode
+    });
+    setCallStatus("Calling...");
+}
+
+async function acceptIncomingCall() {
+    if (!pendingOffer || !ACTIVE_CHAT_ID) return;
+    const mode = pendingOffer.call_type === "video" ? "video" : "audio";
+    callMode = mode;
+    showIncomingBanner(false);
+    setCallStatus(mode === "video" ? "Joining video call..." : "Joining voice call...");
+    await createPeerConnection(mode);
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer.offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    socket.emit("call_answer", {
+        room: `conversation_${ACTIVE_CHAT_ID}`,
+        answer
+    });
+    pendingOffer = null;
+    setCallStatus("In call");
+}
+
+function endCall(notifyPeer = true) {
+    if (notifyPeer && ACTIVE_CHAT_ID) {
+        socket.emit("call_end", { room: `conversation_${ACTIVE_CHAT_ID}` });
+    }
+    pendingOffer = null;
+    showIncomingBanner(false);
+    showCallPanel(false);
+    setCallStatus("Call ended");
+    cleanupPeerConnection();
+    stopLocalStream();
+    isMuted = false;
+    if (muteCallBtn) muteCallBtn.textContent = "Mute";
+}
+
 socket.on("connect", () => {
     if (ACTIVE_CHAT_ID) {
         socket.emit("join_chat", { room: `conversation_${ACTIVE_CHAT_ID}` });
@@ -258,6 +441,38 @@ socket.on("messages_seen", (payload) => {
         const tick = row.querySelector(".message-tick");
         if (tick) tick.textContent = "✓✓";
     });
+});
+
+socket.on("call_offer", async (payload) => {
+    if (!payload || Number(payload.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    if (!payload.offer) return;
+    pendingOffer = payload;
+    const label = payload.call_type === "video" ? "video call" : "voice call";
+    showIncomingBanner(true, `${payload.sender_username || "Someone"} is calling (${label})`);
+    setCallStatus("Incoming call...");
+});
+
+socket.on("call_answer", async (payload) => {
+    if (!payload || Number(payload.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    if (!peerConnection || !payload.answer) return;
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+    setCallStatus("In call");
+});
+
+socket.on("call_ice_candidate", async (payload) => {
+    if (!payload || Number(payload.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    if (!peerConnection || !payload.candidate) return;
+    try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+    } catch (_err) {
+        // Ignore transient ICE race conditions.
+    }
+});
+
+socket.on("call_end", (payload) => {
+    if (!payload || Number(payload.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    endCall(false);
+    setCallStatus("Peer ended the call");
 });
 
 if (composer && messageInput && ACTIVE_CHAT_ID) {
@@ -308,6 +523,68 @@ if (userSearchInput && userList) {
         });
     });
 }
+
+if (aiPromptButtons && messageInput) {
+    aiPromptButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const prompt = btn.getAttribute("data-prompt") || "";
+            messageInput.value = prompt;
+            messageInput.focus();
+        });
+    });
+}
+
+if (audioCallBtn && ACTIVE_CHAT_ID) {
+    audioCallBtn.addEventListener("click", () => {
+        startOutgoingCall("audio").catch(() => setCallStatus("Unable to start call"));
+    });
+}
+
+if (videoCallBtn && ACTIVE_CHAT_ID) {
+    videoCallBtn.addEventListener("click", () => {
+        startOutgoingCall("video").catch(() => setCallStatus("Unable to start call"));
+    });
+}
+
+if (acceptCallBtn) {
+    acceptCallBtn.addEventListener("click", () => {
+        acceptIncomingCall().catch(() => setCallStatus("Unable to join call"));
+    });
+}
+
+if (rejectCallBtn) {
+    rejectCallBtn.addEventListener("click", () => {
+        showIncomingBanner(false);
+        pendingOffer = null;
+        if (ACTIVE_CHAT_ID) {
+            socket.emit("call_end", { room: `conversation_${ACTIVE_CHAT_ID}` });
+        }
+        setCallStatus("Call rejected");
+    });
+}
+
+if (endCallBtn) {
+    endCallBtn.addEventListener("click", () => {
+        endCall(true);
+    });
+}
+
+if (muteCallBtn) {
+    muteCallBtn.addEventListener("click", () => {
+        if (!localStream) return;
+        isMuted = !isMuted;
+        localStream.getAudioTracks().forEach((track) => {
+            track.enabled = !isMuted;
+        });
+        muteCallBtn.textContent = isMuted ? "Unmute" : "Mute";
+    });
+}
+
+window.addEventListener("beforeunload", () => {
+    if (peerConnection || localStream) {
+        endCall(true);
+    }
+});
 
 if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission().catch(() => {});

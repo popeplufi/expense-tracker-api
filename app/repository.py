@@ -68,6 +68,23 @@ def create_user(username, password_hash, email=None):
     return cursor.lastrowid
 
 
+def ensure_friendship(user_a, user_b):
+    if int(user_a) == int(user_b):
+        return False
+    user1 = min(int(user_a), int(user_b))
+    user2 = max(int(user_a), int(user_b))
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT OR IGNORE INTO friendships (user1_id, user2_id)
+        VALUES (?, ?)
+        """,
+        (user1, user2),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
 def get_user_by_username(username):
     db = get_db()
     row = db.execute(

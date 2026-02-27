@@ -199,6 +199,11 @@ body.app-body {
     color: #fff;
 }
 
+.chat-contact-item--bot {
+    border-color: #2a8f74;
+    background: #123329;
+}
+
 .chat-list-item--active {
     border-color: #2a8f74;
     background: #123329;
@@ -249,6 +254,19 @@ body.app-body {
     border-bottom: 1px solid var(--line);
     padding: 0.9rem 1rem;
     background: #10171f;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.chat-window__header-main {
+    min-width: 0;
+}
+
+.call-actions {
+    display: inline-flex;
+    gap: 0.4rem;
 }
 
 .chat-window__messages {
@@ -319,6 +337,77 @@ body.app-body {
     padding: 0 1rem 0.4rem;
     color: #89c4b4;
     font-size: 0.8rem;
+}
+
+.ai-prompt-bar {
+    display: flex;
+    gap: 0.4rem;
+    padding: 0 0.8rem 0.6rem;
+    flex-wrap: wrap;
+}
+
+.ai-prompt-btn {
+    border-color: #2a8f74;
+    color: #9fe4c9;
+    background: rgba(23, 56, 47, 0.35);
+}
+
+.call-panel {
+    margin: 0 0.8rem 0.6rem;
+    border: 1px solid #2a3642;
+    border-radius: 12px;
+    background: #0f141b;
+    padding: 0.7rem;
+}
+
+.call-panel__status {
+    color: #bcd0df;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.call-panel__videos {
+    position: relative;
+    min-height: 140px;
+    background: #05080d;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #263241;
+}
+
+.call-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #05080d;
+}
+
+.call-video--remote {
+    min-height: 140px;
+}
+
+.call-video--local {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: 110px;
+    height: 74px;
+    border: 1px solid #3d556d;
+    border-radius: 8px;
+}
+
+.call-panel__actions {
+    margin-top: 0.6rem;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.incoming-call-banner {
+    margin: 0 0.8rem 0.6rem;
+    border: 1px solid #38536d;
+    border-radius: 12px;
+    background: #102030;
+    padding: 0.7rem;
 }
 
 .status-strip {
@@ -473,5 +562,11 @@ body.app-body {
     .mobile-bottom-nav {
         width: calc(100% - 0.45rem);
         bottom: 0.3rem;
+    }
+
+    .call-actions .btn {
+        min-width: 58px;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
     }
 }
