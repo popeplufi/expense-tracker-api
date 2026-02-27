@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Contacts{% endblock %}
+
+{% block content %}
+<section class="section">
+    <h2 class="mb-1">Contacts</h2>
+    <p class="text-secondary mb-3">Search by username and manage friend requests.</p>
+
+    <div class="card p-3 mb-3">
+        <form method="get" action="{{ url_for('main.contacts_page') }}" class="row g-2">
+            <div class="col-12 col-md-8">
+                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search username (e.g. john123)">
+            </div>
+            <div class="col-12 col-md-4 d-grid">
+                <button type="submit" class="btn btn-primary">Search</button>
+            </div>
+        </form>
+
+        {% if query %}
+        <hr>
+        <h6 class="mb-2">Search results for "{{ query }}"</h6>
+        {% if search_results %}
+            <div class="row g-2">
+                {% for user in search_results %}
+                <div class="col-12 col-md-6 col-lg-4">
+                    <div class="border rounded-3 p-2 h-100 bg-white">
+                        <p class="mb-1 fw-semibold">@{{ user.username }}</p>
+                        <div class="d-flex gap-2">
+                            {% if user.id in outgoing_pending %}
+                                <button class="btn btn-sm btn-outline-secondary" disabled>Request Sent</button>
+                            {% elif friends | selectattr('id', 'equalto', user.id) | list | length > 0 %}
+                                <a href="{{ url_for('main.start_direct_chat', user_id=user.id) }}" class="btn btn-sm btn-primary">Message</a>
+                            {% else %}
+                                <form method="post" action="{{ url_for('main.send_friend_request_route', user_id=user.id) }}">
+                                    <button type="submit" class="btn btn-sm btn-primary">Add Friend</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-secondary mb-0">No users found.</p>
+        {% endif %}
+        {% endif %}
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <div class="card p-3 h-100">
+                <h6 class="mb-2">Incoming Friend Requests</h6>
+                {% if incoming_requests %}
+                    <div class="d-grid gap-2">
+                        {% for req in incoming_requests %}
+                        <div class="border rounded-3 p-2 bg-white d-flex justify-content-between align-items-center gap-2">
+                            <span>@{{ req.sender_username }}</span>
+                            <div class="d-flex gap-1">
+                                <form method="post" action="{{ url_for('main.accept_friend_request_route', request_id=req.id) }}">
+                                    <button class="btn btn-sm btn-primary" type="submit">Accept</button>
+                                </form>
+                                <form method="post" action="{{ url_for('main.reject_friend_request_route', request_id=req.id) }}">
+                                    <button class="btn btn-sm btn-outline-secondary" type="submit">Reject</button>
+                                </form>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-secondary mb-0">No pending requests.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card p-3 h-100">
+                <h6 class="mb-2">Friends</h6>
+                {% if friends %}
+                    <div class="d-grid gap-2">
+                        {% for friend in friends %}
+                        <div class="border rounded-3 p-2 bg-white d-flex justify-content-between align-items-center gap-2">
+                            <span>@{{ friend.username }}</span>
+                            <a href="{{ url_for('main.start_direct_chat', user_id=friend.id) }}" class="btn btn-sm btn-primary">Message</a>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-secondary mb-0">No friends yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

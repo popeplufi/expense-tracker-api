@@ -95,6 +95,9 @@ def _api_user_payload(user):
     return {
         "id": user["id"],
         "username": user["username"],
+        "email": user.get("email"),
+        "is_online": bool(user.get("is_online", 0)),
+        "last_seen": user.get("last_seen"),
         "created_at": user["created_at"],
     }
 
@@ -286,10 +289,11 @@ def login_required(view):
 @bp.route("/register", methods=["GET", "POST"])
 def register():
     if g.user:
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("main.chat_home"))
 
     if request.method == "POST":
         username = request.form["username"].strip()
+        email = request.form.get("email", "").strip().lower() or None
         password_raw = request.form["password"]
         confirm_password = request.form.get("confirm_password", "")
 
@@ -305,9 +309,12 @@ def register():
         if repository.get_user_by_username(username):
             flash("Username is already taken.", "error")
             return render_template("register.html")
+        if email and repository.get_user_by_email(email):
+            flash("Email is already registered.", "error")
+            return render_template("register.html")
 
         password = generate_password_hash(password_raw)
-        user_id = repository.create_user(username, password)
+        user_id = repository.create_user(username, password, email=email)
 
         if repository.count_users() == 1:
             claimed = claim_legacy_expenses_for_user(user_id)
@@ -323,7 +330,7 @@ def register():
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if g.user:
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("main.chat_home"))
 
     if request.method == "POST":
         user = repository.get_user_by_username(request.form["username"].strip())
@@ -331,8 +338,9 @@ def login():
         if user and check_password_hash(user["password_hash"], request.form["password"]):
             login_user(SessionUser(user["id"], user["username"]))
             session["user_id"] = user["id"]
+            repository.set_user_online(user["id"], True)
             flash("Welcome back.", "success")
-            return redirect(url_for("main.dashboard"))
+            return redirect(url_for("main.chat_home"))
 
         flash("Invalid username or password.", "error")
 
@@ -341,6 +349,9 @@ def login():
 
 @bp.post("/logout")
 def logout():
+    if g.user:
+        repository.set_user_online(g.user["id"], False)
+        repository.touch_last_seen(g.user["id"])
     logout_user()
     session.pop("user_id", None)
     flash("Logged out.", "success")
@@ -352,6 +363,7 @@ def logout():
 def api_register():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
+    email = str(payload.get("email", "")).strip().lower() or None
     password = str(payload.get("password", ""))
     confirm_password = str(payload.get("confirm_password", ""))
 
@@ -363,9 +375,11 @@ def api_register():
         return jsonify({"ok": False, "message": "Passwords do not match."}), 400
     if repository.get_user_by_username(username):
         return jsonify({"ok": False, "message": "Username is already taken."}), 409
+    if email and repository.get_user_by_email(email):
+        return jsonify({"ok": False, "message": "Email is already registered."}), 409
 
     password_hash = generate_password_hash(password)
-    user_id = repository.create_user(username, password_hash)
+    user_id = repository.create_user(username, password_hash, email=email)
 
     if repository.count_users() == 1:
         claim_legacy_expenses_for_user(user_id)
@@ -399,6 +413,8 @@ def api_login():
     if not user or not check_password_hash(user["password_hash"], password):
         return jsonify({"ok": False, "message": "Invalid username or password."}), 401
 
+    repository.set_user_online(user["id"], True)
+    user = repository.get_user_by_id(user["id"])
     token = _create_jwt(user["id"])
     return jsonify(
         {
@@ -419,19 +435,159 @@ def api_auth_me():
 @bp.get("/profile")
 @login_required
 def profile():
-    stats = repository.profile_stats(g.user["id"])
-    stats["total_spent"] = _amount_for_currency(stats["total_spent"], g.currency)
-    if stats["top_category"]:
-        stats["top_category"]["total"] = _amount_for_currency(
-            stats["top_category"]["total"], g.currency
-        )
+    stats = repository.chat_stats(g.user["id"])
     return render_template("profile.html", stats=stats)
 
 
 @bp.get("/")
+@login_required
+def chat_home():
+    selected_chat_raw = request.args.get("chat", "").strip()
+    selected_chat_id = None
+    if selected_chat_raw.isdigit():
+        selected_chat_id = int(selected_chat_raw)
+
+    chats = repository.list_user_chats(g.user["id"])
+    users = repository.list_friends(g.user["id"])
+
+    if selected_chat_id and not repository.user_in_chat(g.user["id"], selected_chat_id):
+        selected_chat_id = None
+
+    if selected_chat_id is None and chats:
+        selected_chat_id = chats[0]["id"]
+
+    messages = []
+    active_chat = None
+    if selected_chat_id is not None:
+        active_chat = repository.get_chat(selected_chat_id)
+        messages = repository.list_chat_messages(selected_chat_id, limit=200)
+
+    return render_template(
+        "chat.html",
+        chats=chats,
+        users=users,
+        active_chat=active_chat,
+        messages=messages,
+        active_chat_id=selected_chat_id,
+    )
+
+
 @bp.get("/insights")
+def legacy_insights():
+    return redirect(url_for("main.chat_home"))
+
+
 @bp.get("/auth/login")
+def legacy_auth_login():
+    return redirect(url_for("main.login"))
+
+
 @bp.get("/auth/register")
+def legacy_auth_register():
+    return redirect(url_for("main.register"))
+
+
+@bp.get("/contacts")
+@login_required
+def contacts_page():
+    query = request.args.get("q", "").strip()
+    search_results = repository.search_users_by_username(query, g.user["id"]) if query else []
+    incoming_requests = repository.list_incoming_friend_requests(g.user["id"])
+    friends = repository.list_friends(g.user["id"])
+    outgoing_pending = repository.list_outgoing_friend_request_receiver_ids(g.user["id"])
+    return render_template(
+        "contacts.html",
+        query=query,
+        search_results=search_results,
+        incoming_requests=incoming_requests,
+        friends=friends,
+        outgoing_pending=outgoing_pending,
+    )
+
+
+@bp.get("/status")
+@login_required
+def status_page():
+    return render_template("status.html")
+
+
+@bp.get("/chat/start/<int:user_id>")
+@login_required
+def start_direct_chat(user_id):
+    if user_id == g.user["id"]:
+        flash("Cannot start a chat with yourself.", "error")
+        return redirect(url_for("main.chat_home"))
+
+    target = repository.get_user_by_id(user_id)
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("main.chat_home"))
+
+    if not repository.are_friends(g.user["id"], user_id):
+        flash("Only friends can message each other.", "error")
+        return redirect(url_for("main.contacts_page"))
+
+    chat_id = repository.get_or_create_direct_chat(g.user["id"], user_id)
+    return redirect(url_for("main.chat_home", chat=chat_id))
+
+
+@bp.post("/chat/<int:chat_id>/send")
+@login_required
+def send_chat_message(chat_id):
+    if not repository.user_in_chat(g.user["id"], chat_id):
+        flash("Chat not found.", "error")
+        return redirect(url_for("main.chat_home"))
+
+    members = repository.get_chat_member_ids(chat_id)
+    if len(members) == 2:
+        peer_id = members[0] if members[1] == g.user["id"] else members[1]
+        if not repository.are_friends(g.user["id"], peer_id):
+            flash("Only friends can message each other.", "error")
+            return redirect(url_for("main.chat_home", chat=chat_id))
+
+    body = request.form.get("body", "").strip()
+    if not body:
+        return redirect(url_for("main.chat_home", chat=chat_id))
+
+    repository.create_message(chat_id, g.user["id"], body)
+    return redirect(url_for("main.chat_home", chat=chat_id))
+
+
+@bp.post("/friends/request/<int:user_id>")
+@login_required
+def send_friend_request_route(user_id):
+    target = repository.get_user_by_id(user_id)
+    if not target or int(target["id"]) == int(g.user["id"]):
+        flash("User not found.", "error")
+        return redirect(url_for("main.contacts_page"))
+
+    if repository.send_friend_request(g.user["id"], user_id):
+        flash("Friend request sent.", "success")
+    else:
+        flash("Unable to send request.", "error")
+    return redirect(url_for("main.contacts_page"))
+
+
+@bp.post("/friends/request/<int:request_id>/accept")
+@login_required
+def accept_friend_request_route(request_id):
+    if repository.respond_friend_request(request_id, g.user["id"], accept=True):
+        flash("Friend request accepted.", "success")
+    else:
+        flash("Unable to accept request.", "error")
+    return redirect(url_for("main.contacts_page"))
+
+
+@bp.post("/friends/request/<int:request_id>/reject")
+@login_required
+def reject_friend_request_route(request_id):
+    if repository.respond_friend_request(request_id, g.user["id"], accept=False):
+        flash("Friend request rejected.", "success")
+    else:
+        flash("Unable to reject request.", "error")
+    return redirect(url_for("main.contacts_page"))
+
+
 @bp.get("/frontend")
 def frontend():
     return render_template("frontend.html")
@@ -447,10 +603,24 @@ def dashboard():
         offset=0,
     )
     expenses = dashboard_payload["expenses"]
+    category_rows = dashboard_payload["chart_data"]["categories"]
+    current_month = date.today().strftime("%Y-%m")
+    month_total = 0
+    for row in dashboard_payload["monthly_summary"]:
+        if row.get("month") == current_month:
+            month_total = row.get("total", 0)
+            break
+    category_labels = [row["name"] if "name" in row else row["category"] for row in category_rows]
+    category_values = [row["total"] for row in category_rows]
     return render_template(
         "dashboard.html",
         expenses=expenses,
         total_expense=dashboard_payload["totals"]["overall"],
+        month_total=month_total,
+        expense_count=len(expenses),
+        category_cards=category_rows[:6],
+        category_labels=category_labels,
+        category_values=category_values,
     )
 
 
@@ -458,6 +628,20 @@ def dashboard():
 @login_required
 def add_expense_page():
     return render_template("add_expense.html")
+
+
+@bp.get("/categories")
+@login_required
+def categories_page():
+    summary = repository.category_summary(g.user["id"])
+    categories = [
+        {
+            "name": row["category"],
+            "total": _amount_for_currency(row["total"], g.currency),
+        }
+        for row in summary
+    ]
+    return render_template("categories.html", categories=categories)
 
 
 @bp.post("/expenses")

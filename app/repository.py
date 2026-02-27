@@ -55,14 +55,14 @@ def _safe_offset(offset):
     return max(0, value)
 
 
-def create_user(username, password_hash):
+def create_user(username, password_hash, email=None):
     db = get_db()
     cursor = db.execute(
         """
-        INSERT INTO users (username, password_hash)
-        VALUES (?, ?)
+        INSERT INTO users (username, email, password_hash)
+        VALUES (?, ?, ?)
         """,
-        (username, password_hash),
+        (username, email, password_hash),
     )
     db.commit()
     return cursor.lastrowid
@@ -71,8 +71,25 @@ def create_user(username, password_hash):
 def get_user_by_username(username):
     db = get_db()
     row = db.execute(
-        "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",
+        """
+        SELECT id, username, email, password_hash, is_online, last_seen, created_at
+        FROM users
+        WHERE username = ?
+        """,
         (username,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT id, username, email, password_hash, is_online, last_seen, created_at
+        FROM users
+        WHERE email = ?
+        """,
+        (email,),
     ).fetchone()
     return dict(row) if row else None
 
@@ -80,7 +97,11 @@ def get_user_by_username(username):
 def get_user_by_id(user_id):
     db = get_db()
     row = db.execute(
-        "SELECT id, username, password_hash, created_at FROM users WHERE id = ?",
+        """
+        SELECT id, username, email, password_hash, is_online, last_seen, created_at
+        FROM users
+        WHERE id = ?
+        """,
         (user_id,),
     ).fetchone()
     return dict(row) if row else None
@@ -90,6 +111,32 @@ def count_users():
     db = get_db()
     row = db.execute("SELECT COUNT(*) AS count FROM users").fetchone()
     return int(row["count"])
+
+
+def set_user_online(user_id, is_online):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE users
+        SET is_online = ?, last_seen = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (1 if is_online else 0, user_id),
+    )
+    db.commit()
+
+
+def touch_last_seen(user_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE users
+        SET last_seen = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (user_id,),
+    )
+    db.commit()
 
 
 def add_expense(user_id, name, amount, category, expense_date):
@@ -324,3 +371,393 @@ def profile_stats(user_id):
         "latest_expense_date": overview["latest_expense_date"] if overview else None,
         "top_category": dict(top_category) if top_category else None,
     }
+
+
+def list_other_users(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, username, created_at
+        FROM users
+        WHERE id != ?
+        ORDER BY username ASC
+        """,
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def search_users_by_username(search_term, exclude_user_id, limit=30):
+    db = get_db()
+    query = str(search_term or "").strip()
+    if not query:
+        return []
+    rows = db.execute(
+        """
+        SELECT id, username, is_online, last_seen
+        FROM users
+        WHERE id != ?
+          AND username LIKE ?
+        ORDER BY username ASC
+        LIMIT ?
+        """,
+        (exclude_user_id, f"%{query}%", _safe_limit(limit, default=30, max_limit=100)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def are_friends(user_a, user_b):
+    user1 = min(user_a, user_b)
+    user2 = max(user_a, user_b)
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT 1
+        FROM friendships
+        WHERE user1_id = ? AND user2_id = ?
+        LIMIT 1
+        """,
+        (user1, user2),
+    ).fetchone()
+    return bool(row)
+
+
+def list_friends(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT u.id, u.username, u.is_online, u.last_seen
+        FROM friendships f
+        JOIN users u ON u.id = CASE
+            WHEN f.user1_id = ? THEN f.user2_id
+            ELSE f.user1_id
+        END
+        WHERE f.user1_id = ? OR f.user2_id = ?
+        ORDER BY u.username ASC
+        """,
+        (user_id, user_id, user_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_incoming_friend_requests(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT fr.id, fr.sender_id, u.username AS sender_username, fr.created_at
+        FROM friend_requests fr
+        JOIN users u ON u.id = fr.sender_id
+        WHERE fr.receiver_id = ? AND fr.status = 'pending'
+        ORDER BY fr.created_at DESC, fr.id DESC
+        """,
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_outgoing_friend_request_receiver_ids(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT receiver_id
+        FROM friend_requests
+        WHERE sender_id = ? AND status = 'pending'
+        """,
+        (user_id,),
+    ).fetchall()
+    return {int(row["receiver_id"]) for row in rows}
+
+
+def send_friend_request(sender_id, receiver_id):
+    if sender_id == receiver_id:
+        return False
+    if are_friends(sender_id, receiver_id):
+        return False
+
+    db = get_db()
+    existing = db.execute(
+        """
+        SELECT id
+        FROM friend_requests
+        WHERE (
+            (sender_id = ? AND receiver_id = ?)
+            OR (sender_id = ? AND receiver_id = ?)
+        )
+          AND status = 'pending'
+        LIMIT 1
+        """,
+        (sender_id, receiver_id, receiver_id, sender_id),
+    ).fetchone()
+    if existing:
+        return False
+
+    db.execute(
+        """
+        INSERT INTO friend_requests (sender_id, receiver_id, status)
+        VALUES (?, ?, 'pending')
+        """,
+        (sender_id, receiver_id),
+    )
+    db.commit()
+    return True
+
+
+def respond_friend_request(request_id, receiver_id, accept):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT id, sender_id, receiver_id, status
+        FROM friend_requests
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (request_id,),
+    ).fetchone()
+    if not row:
+        return False
+    req = dict(row)
+    if int(req["receiver_id"]) != int(receiver_id):
+        return False
+    if req["status"] != "pending":
+        return False
+
+    status = "accepted" if accept else "rejected"
+    db.execute(
+        """
+        UPDATE friend_requests
+        SET status = ?, responded_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, request_id),
+    )
+
+    if accept:
+        user1 = min(int(req["sender_id"]), int(req["receiver_id"]))
+        user2 = max(int(req["sender_id"]), int(req["receiver_id"]))
+        db.execute(
+            """
+            INSERT OR IGNORE INTO friendships (user1_id, user2_id)
+            VALUES (?, ?)
+            """,
+            (user1, user2),
+        )
+    db.commit()
+    return True
+
+
+def _find_direct_chat(user_a, user_b):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT c.id
+        FROM chats c
+        JOIN chat_members cm1 ON cm1.chat_id = c.id
+        JOIN chat_members cm2 ON cm2.chat_id = c.id
+        WHERE c.is_group = 0
+          AND cm1.user_id = ?
+          AND cm2.user_id = ?
+          AND (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) = 2
+        LIMIT 1
+        """,
+        (user_a, user_b),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def get_or_create_direct_chat(user_a, user_b):
+    existing = _find_direct_chat(user_a, user_b)
+    if existing:
+        db = get_db()
+        user1_id = min(user_a, user_b)
+        user2_id = max(user_a, user_b)
+        db.execute(
+            """
+            INSERT OR IGNORE INTO conversations (id, user1_id, user2_id, created_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (existing, user1_id, user2_id),
+        )
+        db.commit()
+        return existing
+
+    db = get_db()
+    cursor = db.execute("INSERT INTO chats (is_group, name) VALUES (0, NULL)")
+    chat_id = cursor.lastrowid
+    db.execute(
+        "INSERT INTO chat_members (chat_id, user_id) VALUES (?, ?)",
+        (chat_id, user_a),
+    )
+    db.execute(
+        "INSERT INTO chat_members (chat_id, user_id) VALUES (?, ?)",
+        (chat_id, user_b),
+    )
+    user1_id = min(user_a, user_b)
+    user2_id = max(user_a, user_b)
+    db.execute(
+        """
+        INSERT OR IGNORE INTO conversations (id, user1_id, user2_id, created_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (chat_id, user1_id, user2_id),
+    )
+    db.commit()
+    return chat_id
+
+
+def get_chat_member_ids(chat_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT user_id
+        FROM chat_members
+        WHERE chat_id = ?
+        ORDER BY user_id ASC
+        """,
+        (chat_id,),
+    ).fetchall()
+    return [int(row["user_id"]) for row in rows]
+
+
+def list_user_chats(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            c.id,
+            c.is_group,
+            c.name,
+            (
+                SELECT m.body
+                FROM messages m
+                WHERE m.chat_id = c.id
+                ORDER BY m.id DESC
+                LIMIT 1
+            ) AS last_message,
+            (
+                SELECT m.created_at
+                FROM messages m
+                WHERE m.chat_id = c.id
+                ORDER BY m.id DESC
+                LIMIT 1
+            ) AS last_message_at,
+            (
+                SELECT u.username
+                FROM chat_members cm2
+                JOIN users u ON u.id = cm2.user_id
+                WHERE cm2.chat_id = c.id
+                  AND cm2.user_id != ?
+                ORDER BY u.username ASC
+                LIMIT 1
+            ) AS peer_username
+        FROM chats c
+        JOIN chat_members cm ON cm.chat_id = c.id
+        WHERE cm.user_id = ?
+        ORDER BY COALESCE(last_message_at, c.created_at) DESC, c.id DESC
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def user_in_chat(user_id, chat_id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT 1
+        FROM chat_members
+        WHERE user_id = ? AND chat_id = ?
+        LIMIT 1
+        """,
+        (user_id, chat_id),
+    ).fetchone()
+    return bool(row)
+
+
+def get_chat(chat_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT id, is_group, name, created_at FROM chats WHERE id = ?",
+        (chat_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_chat_messages(chat_id, limit=120):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            m.id,
+            COALESCE(m.conversation_id, m.chat_id) AS chat_id,
+            m.sender_id,
+            u.username AS sender_username,
+            COALESCE(m.content, m.body) AS body,
+            COALESCE(m.timestamp, m.created_at) AS created_at,
+            m.is_seen
+        FROM messages m
+        JOIN users u ON u.id = m.sender_id
+        WHERE COALESCE(m.conversation_id, m.chat_id) = ?
+        ORDER BY m.id DESC
+        LIMIT ?
+        """,
+        (chat_id, _safe_limit(limit, default=120, max_limit=500)),
+    ).fetchall()
+    items = [dict(row) for row in rows]
+    items.reverse()
+    return items
+
+
+def create_message(chat_id, sender_id, body):
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO messages (conversation_id, sender_id, content, timestamp, is_seen, chat_id, body, created_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (chat_id, sender_id, body, chat_id, body),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def chat_stats(user_id):
+    db = get_db()
+    chats_row = db.execute(
+        "SELECT COUNT(*) AS count FROM chat_members WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    sent_row = db.execute(
+        "SELECT COUNT(*) AS count FROM messages WHERE sender_id = ?",
+        (user_id,),
+    ).fetchone()
+    contacts_row = db.execute(
+        "SELECT COUNT(*) AS count FROM users WHERE id != ?",
+        (user_id,),
+    ).fetchone()
+    return {
+        "chat_count": int(chats_row["count"]) if chats_row else 0,
+        "sent_count": int(sent_row["count"]) if sent_row else 0,
+        "contact_count": int(contacts_row["count"]) if contacts_row else 0,
+    }
+
+
+def get_message_by_id(message_id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT
+            m.id,
+            COALESCE(m.conversation_id, m.chat_id) AS chat_id,
+            m.sender_id,
+            u.username AS sender_username,
+            COALESCE(m.content, m.body) AS body,
+            COALESCE(m.timestamp, m.created_at) AS created_at,
+            m.is_seen
+        FROM messages m
+        JOIN users u ON u.id = m.sender_id
+        WHERE m.id = ?
+        LIMIT 1
+        """,
+        (message_id,),
+    ).fetchone()
+    return dict(row) if row else None

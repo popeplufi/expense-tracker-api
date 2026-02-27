@@ -3,33 +3,131 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2 class="mb-4">Dashboard</h2>
-
-    <div class="card p-3 mb-4">
-        <h5>Total Expenses</h5>
-        <h3>$ {{ total_expense }}</h3>
+<section class="section">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Dashboard</h2>
+            <p class="text-secondary mb-0">Clear overview of your spending and category mix.</p>
+        </div>
+        <a href="{{ url_for('main.add_expense_page') }}" class="btn btn-primary">Add Expense</a>
     </div>
 
-    <a href="/add-expense" class="btn btn-primary mb-3">Add Expense</a>
+    <div class="row g-3 mb-1">
+        <div class="col-12 col-md-4">
+            <article class="card p-3 h-100">
+                <p class="text-uppercase text-secondary small mb-2">Total Spent</p>
+                <h3 class="mb-0">{{ current_currency_symbol }} {{ total_expense }}</h3>
+            </article>
+        </div>
+        <div class="col-12 col-md-4">
+            <article class="card p-3 h-100">
+                <p class="text-uppercase text-secondary small mb-2">This Month</p>
+                <h3 class="mb-0">{{ current_currency_symbol }} {{ month_total }}</h3>
+            </article>
+        </div>
+        <div class="col-12 col-md-4">
+            <article class="card p-3 h-100">
+                <p class="text-uppercase text-secondary small mb-2">Transactions</p>
+                <h3 class="mb-0">{{ expense_count }}</h3>
+            </article>
+        </div>
+    </div>
+</section>
 
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Amount</th>
-                <th>Category</th>
-                <th>Date</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for expense in expenses %}
-            <tr>
-                <td>{{ expense.amount }}</td>
-                <td>{{ expense.category }}</td>
-                <td>{{ expense.expense_date or expense.date }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+<section class="section">
+    <div class="row g-3">
+        <div class="col-12 col-lg-5">
+            <div class="card p-3 h-100">
+                <h5 class="mb-3">Category Split</h5>
+                <div style="max-width: 360px; margin: 0 auto;">
+                    <canvas id="categoryDonutChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-7">
+            <div class="card p-3 h-100">
+                <h5 class="mb-3">Top Categories</h5>
+                {% if category_cards %}
+                <div class="row g-2">
+                    {% for item in category_cards %}
+                    <div class="col-12 col-sm-6">
+                        <div class="border rounded-3 p-2 h-100 bg-white">
+                            <p class="text-secondary mb-1 small">{{ item.category }}</p>
+                            <p class="mb-0 fw-semibold">{{ current_currency_symbol }} {{ item.total }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-secondary mb-0">No category data yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="card p-3">
+        <h5 class="mb-3">Recent Expenses</h5>
+        {% if expenses %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Amount</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for expense in expenses %}
+                    <tr>
+                        <td>{{ expense.name or "Expense" }}</td>
+                        <td>{{ expense.category }}</td>
+                        <td class="fw-semibold">{{ current_currency_symbol }} {{ expense.amount }}</td>
+                        <td>{{ expense.expense_date or expense.date }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-secondary mb-0">No expenses recorded yet.</p>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const categoryCanvas = document.getElementById("categoryDonutChart");
+if (categoryCanvas) {
+    const labels = {{ category_labels | tojson }};
+    const values = {{ category_values | tojson }};
+    if (labels.length && values.length) {
+        new Chart(categoryCanvas, {
+            type: "doughnut",
+            data: {
+                labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316", "#06b6d4", "#84cc16"],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+    } else {
+        categoryCanvas.parentElement.innerHTML = '<p class="text-secondary mb-0">No category data yet.</p>';
+    }
+}
+</script>
 {% endblock %}

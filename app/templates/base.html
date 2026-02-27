@@ -3,162 +3,58 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Expense Tracker Pro{% endblock %}</title>
+    <title>{% block title %}Plufi Chat{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8f9fa;
-        }
-    </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <style>
-        .btn-primary {
-            background-color: #111;
-            border: none;
-        }
-        .btn-primary:hover {
-            background-color: #333;
-        }
-        .card {
-            border-radius: 15px;
-        }
-        .nav-link:hover {
-            background-color: rgba(255,255,255,0.1);
-            border-radius: 8px;
-        }
-    </style>
 </head>
 <body class="app-body">
-    <div class="bg-blob bg-blob-a"></div>
-    <div class="bg-blob bg-blob-b"></div>
-
-    <nav class="navbar navbar-expand-lg navbar-dark app-nav py-3">
-        <div class="container">
-            <a class="navbar-brand brand-mark" href="{{ url_for('main.dashboard') if g.user else url_for('main.login') }}">{{ t('app_name') }}</a>
-            <button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#appNavbar" aria-controls="appNavbar" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="appNavbar">
-                <div class="ms-auto d-flex flex-column flex-lg-row align-items-lg-center gap-2 mt-3 mt-lg-0">
-                    <div class="pref-controls d-flex flex-wrap gap-2">
-                        <select
-                            id="languageSwitcher"
-                            class="form-select form-select-sm pref-select"
-                            onchange="appSetPreference('language', this.value)"
-                        >
-                            {% for code, label in language_options.items() %}
-                                <option value="{{ code }}" {% if code == current_language %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                        <select
-                            id="currencySwitcher"
-                            class="form-select form-select-sm pref-select"
-                            onchange="appSetPreference('currency', this.value)"
-                        >
-                            {% for code, info in currency_options.items() %}
-                                <option value="{{ code }}" {% if code == current_currency %}selected{% endif %}>{{ code }} {{ info.symbol }}</option>
-                            {% endfor %}
-                        </select>
-                        <span class="tz-pill" id="timezoneBadge">{{ current_timezone }}</span>
-                    </div>
-                    {% if g.user %}
-                        <span class="user-pill">@{{ g.user.username }}</span>
-                        <a class="btn btn-sm btn-outline-light rounded-pill px-3" href="{{ url_for('main.profile') }}">{{ t('nav_profile') }}</a>
-                        <form method="post" action="{{ url_for('main.logout') }}" class="d-inline">
-                            <button type="submit" class="btn btn-sm btn-outline-light rounded-pill px-3">{{ t('nav_logout') }}</button>
-                        </form>
-                    {% else %}
-                        <a class="btn btn-sm btn-outline-light rounded-pill px-3" href="{{ url_for('main.login') }}">{{ t('nav_login') }}</a>
-                        <a class="btn btn-sm btn-light rounded-pill px-3" href="{{ url_for('main.register') }}">{{ t('nav_register') }}</a>
-                    {% endif %}
-                </div>
+    <header class="app-topbar">
+        <div class="container app-topbar__inner">
+            <a class="app-brand" href="{{ url_for('main.chat_home') if g.user else url_for('main.login') }}">Plufi Chat</a>
+            <div class="d-flex align-items-center gap-2">
+                {% if g.user %}
+                    <span class="app-user">@{{ g.user.username }}</span>
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.profile') }}">Profile</a>
+                    <form method="post" action="{{ url_for('main.logout') }}" class="d-inline">
+                        <button type="submit" class="btn btn-dark btn-sm">Logout</button>
+                    </form>
+                {% else %}
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.login') }}">Login</a>
+                    <a class="btn btn-dark btn-sm" href="{{ url_for('main.register') }}">Register</a>
+                {% endif %}
             </div>
-        </div>
-    </nav>
-
-    <header class="container mb-4">
-        <div class="hero-panel rounded-4 p-4 p-md-5">
-            <p class="hero-kicker mb-2">{{ t('hero_kicker') }}</p>
-            <h1 class="hero-title mb-2">{{ t('app_name') }}</h1>
-            <p class="hero-subtitle mb-0">{{ t('hero_subtitle') }}</p>
         </div>
     </header>
 
-    <main class="container pb-5">
+    <main class="container app-main-content">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <section class="flash-stack mb-4">
+                <section class="mb-3">
                     {% for category, message in messages %}
-                        <div class="alert {% if category == 'success' %}alert-success{% else %}alert-danger{% endif %} border-0 rounded-4 shadow-sm mb-2" role="alert">
+                        <div class="alert {% if category == 'success' %}alert-success{% else %}alert-danger{% endif %} border-0 mb-2" role="alert">
                             {{ message }}
                         </div>
                     {% endfor %}
                 </section>
             {% endif %}
         {% endwith %}
+
         {% block content %}{% endblock %}
     </main>
 
+    {% if g.user %}
+    <nav class="mobile-bottom-nav" aria-label="Bottom Navigation">
+        <a href="{{ url_for('main.chat_home') }}" class="mobile-bottom-nav__item {% if request.path == '/' %}mobile-bottom-nav__item--active{% endif %}">Chats</a>
+        <a href="{{ url_for('main.contacts_page') }}" class="mobile-bottom-nav__item {% if request.path == '/contacts' %}mobile-bottom-nav__item--active{% endif %}">Contacts</a>
+        <a href="{{ url_for('main.status_page') }}" class="mobile-bottom-nav__item {% if request.path == '/status' %}mobile-bottom-nav__item--active{% endif %}">Status</a>
+        <a href="{{ url_for('main.profile') }}" class="mobile-bottom-nav__item {% if request.path == '/profile' %}mobile-bottom-nav__item--active{% endif %}">Profile</a>
+    </nav>
+    {% endif %}
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        window.appPreferenceState = {
-            language: {{ current_language | tojson }},
-            currency: {{ current_currency | tojson }},
-            timezone: {{ current_timezone | tojson }},
-        };
-
-        async function appSetPreferences(payload, reload = true) {
-            try {
-                const response = await fetch("/api/preferences", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                });
-                if (!response.ok) return;
-                const data = await response.json();
-                if (!data.ok) return;
-
-                window.appPreferenceState = data.preferences;
-                const timezoneBadge = document.getElementById("timezoneBadge");
-                if (timezoneBadge) {
-                    timezoneBadge.textContent = data.preferences.timezone;
-                }
-                if (reload) {
-                    window.location.reload();
-                }
-            } catch (_error) {
-                // ignore preference sync failures
-            }
-        }
-
-        function appSetPreference(key, value) {
-            appSetPreferences({ [key]: value }, true);
-        }
-
-        function toggleDark() {
-            document.body.classList.toggle("bg-dark");
-            document.body.classList.toggle("text-white");
-        }
-
-        document.addEventListener("DOMContentLoaded", function() {
-            document.body.style.opacity = 0;
-            setTimeout(() => {
-                document.body.style.transition = "opacity 0.5s ease";
-                document.body.style.opacity = 1;
-            }, 100);
-
-            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-            if (timezone && timezone !== window.appPreferenceState.timezone) {
-                appSetPreferences({ timezone }, false);
-            }
-        });
-    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

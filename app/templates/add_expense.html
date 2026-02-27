@@ -3,34 +3,37 @@
 {% block title %}Add Expense{% endblock %}
 
 {% block content %}
-<div class="container mt-5" style="max-width: 640px;">
-    <h2 class="mb-4">Add Expense</h2>
+<section class="section" style="max-width: 760px; margin-inline: auto;">
+    <div class="card p-4">
+        <h2 class="mb-1">Add Expense</h2>
+        <p class="text-secondary mb-4">Create a new transaction in your budget tracker.</p>
 
-    <form method="post" action="{{ url_for('main.create_expense') }}" class="card p-4">
-        <div class="mb-3">
-            <label for="name" class="form-label">Name</label>
-            <input type="text" class="form-control" id="name" name="name" required>
-        </div>
+        <form method="post" action="{{ url_for('main.create_expense') }}" class="row g-3">
+            <div class="col-12">
+                <label for="name" class="form-label">Name</label>
+                <input type="text" class="form-control" id="name" name="name" required>
+            </div>
 
-        <div class="mb-3">
-            <label for="amount" class="form-label">Amount</label>
-            <input type="number" step="0.01" min="0.01" class="form-control" id="amount" name="amount" required>
-        </div>
+            <div class="col-12 col-md-6">
+                <label for="amount" class="form-label">Amount</label>
+                <input type="number" step="0.01" min="0.01" class="form-control" id="amount" name="amount" required>
+            </div>
 
-        <div class="mb-3">
-            <label for="category" class="form-label">Category</label>
-            <input type="text" class="form-control" id="category" name="category" required>
-        </div>
+            <div class="col-12 col-md-6">
+                <label for="category" class="form-label">Category</label>
+                <input type="text" class="form-control" id="category" name="category" required>
+            </div>
 
-        <div class="mb-4">
-            <label for="expense_date" class="form-label">Date</label>
-            <input type="date" class="form-control" id="expense_date" name="expense_date">
-        </div>
+            <div class="col-12">
+                <label for="expense_date" class="form-label">Date</label>
+                <input type="date" class="form-control" id="expense_date" name="expense_date">
+            </div>
 
-        <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary">Save</button>
-            <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Back</a>
-        </div>
-    </form>
-</div>
+            <div class="col-12 d-flex gap-2 mt-2">
+                <button type="submit" class="btn btn-primary">Save Expense</button>
+                <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Back</a>
+            </div>
+        </form>
+    </div>
+</section>
 {% endblock %}

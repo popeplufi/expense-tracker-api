@@ -1,33 +1,41 @@
 {% extends "base.html" %}
 
-{% block title %}Register - Expense Tracker Pro{% endblock %}
+{% block title %}Register{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8 col-lg-5">
-        <section class="card app-card hover-lift">
-            <div class="card-body p-4 p-lg-5">
-                <h2 class="section-title mb-3">{{ t('register') }}</h2>
+<section class="section" style="max-width: 980px; margin-inline: auto;">
+    <div class="row g-3 align-items-stretch">
+        <div class="col-12 col-lg-6">
+            <div class="card p-4 h-100 text-white" style="background: linear-gradient(145deg,#2563eb,#1d4ed8);">
+                <h2 class="mb-2">Create Account</h2>
+                <p class="mb-0" style="opacity:0.92;">Start tracking your spending with a polished budgeting workflow.</p>
+            </div>
+        </div>
+        <div class="col-12 col-lg-6">
+            <div class="card p-4 h-100">
+                <h3 class="mb-3">{{ t('register') }}</h3>
                 <form method="post" action="{{ url_for('main.register') }}" class="d-grid gap-3">
                     <div>
                         <label for="username" class="form-label">{{ t('username') }}</label>
-                        <input id="username" class="form-control form-control-lg" type="text" name="username" minlength="3" required autofocus>
+                        <input id="username" class="form-control" type="text" name="username" minlength="3" required autofocus>
+                    </div>
+                    <div>
+                        <label for="email" class="form-label">Email</label>
+                        <input id="email" class="form-control" type="email" name="email" required>
                     </div>
                     <div>
                         <label for="password" class="form-label">{{ t('password') }}</label>
-                        <input id="password" class="form-control form-control-lg" type="password" name="password" minlength="6" required>
+                        <input id="password" class="form-control" type="password" name="password" minlength="6" required>
                     </div>
                     <div>
                         <label for="confirm_password" class="form-label">{{ t('confirm_password') }}</label>
-                        <input id="confirm_password" class="form-control form-control-lg" type="password" name="confirm_password" minlength="6" required>
+                        <input id="confirm_password" class="form-control" type="password" name="confirm_password" minlength="6" required>
                     </div>
-                    <button type="submit" class="btn btn-primary btn-lg">{{ t('register') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ t('register') }}</button>
                 </form>
-                <p class="auth-note mt-3 mb-0">
-                    {{ t('already_have') }} <a href="{{ url_for('main.login') }}">{{ t('login') }}</a>.
-                </p>
+                <p class="mt-3 mb-0 text-secondary">{{ t('already_have') }} <a href="{{ url_for('main.login') }}">{{ t('login') }}</a>.</p>
             </div>
-        </section>
+        </div>
     </div>
-</div>
+</section>
 {% endblock %}

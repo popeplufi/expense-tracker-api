@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Chats{% endblock %}
+
+{% block content %}
+<section class="section">
+    <div class="chat-layout whatsapp-layout">
+        <aside class="card chat-sidebar whatsapp-sidebar">
+            <header class="whatsapp-sidebar__top">
+                <div>
+                    <p class="mb-0 text-secondary small">Signed in as</p>
+                    <h6 class="mb-0">@{{ g.user.username }}</h6>
+                </div>
+                <a href="{{ url_for('main.profile') }}" class="btn btn-outline-secondary btn-sm">Profile</a>
+            </header>
+
+            <div class="whatsapp-sidebar__search">
+                <input
+                    id="userSearchInput"
+                    type="text"
+                    class="form-control"
+                    placeholder="Search friends..."
+                    autocomplete="off"
+                >
+            </div>
+
+            <div class="chat-list" id="chatList">
+                {% if chats %}
+                    {% for chat in chats %}
+                    <a
+                        href="{{ url_for('main.chat_home', chat=chat.id) }}"
+                        class="chat-list-item {% if active_chat_id == chat.id %}chat-list-item--active{% endif %}"
+                        data-chat-name="{{ (chat.peer_username or chat.name or 'Chat') | lower }}"
+                    >
+                        <div class="chat-list-item__title">{{ chat.peer_username or chat.name or "Chat" }}</div>
+                        <div class="chat-list-item__meta">{{ chat.last_message or "No messages yet" }}</div>
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-secondary small mb-0">No chats yet. Start one from contacts.</p>
+                {% endif %}
+            </div>
+
+            <h6 class="mt-4 mb-2">Start Chat</h6>
+            <div class="chat-contacts" id="userList">
+                {% if users %}
+                    {% for user in users %}
+                    <a
+                        href="{{ url_for('main.start_direct_chat', user_id=user.id) }}"
+                        class="chat-contact-item"
+                        data-user-name="{{ user.username | lower }}"
+                    >
+                        {{ user.username }}
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-secondary small mb-0">No other users found.</p>
+                {% endif %}
+            </div>
+        </aside>
+
+        <section class="card chat-window whatsapp-chat-window">
+            {% if active_chat %}
+            <header class="chat-window__header whatsapp-chat-header">
+                <div>
+                    <p class="text-secondary small mb-0">Chat</p>
+                    <h5 class="mb-0">Conversation</h5>
+                </div>
+            </header>
+
+            <div class="chat-window__messages" id="chatMessages">
+                {% if messages %}
+                    {% for message in messages %}
+                    <article class="message-row {% if message.sender_id == g.user.id %}message-row--me{% endif %}" data-message-id="{{ message.id }}">
+                        <div class="message-bubble {% if message.sender_id == g.user.id %}message-bubble--me{% endif %}">
+                            <p class="message-text mb-1">{{ message.body }}</p>
+                            <p class="message-meta mb-0">{{ message.sender_username }} · {{ message.created_at }}</p>
+                        </div>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-secondary mb-0">No messages yet. Say hello.</p>
+                {% endif %}
+            </div>
+
+            <form method="post" action="{{ url_for('main.send_chat_message', chat_id=active_chat.id) }}" class="chat-window__composer whatsapp-composer" id="chatComposer">
+                <input type="text" class="form-control" name="body" placeholder="Type a message..." autocomplete="off" required>
+                <button type="submit" class="btn btn-primary">Send</button>
+            </form>
+            {% else %}
+            <div class="chat-window__empty">
+                <h5>No chat selected</h5>
+                <p class="text-secondary mb-0">Choose a chat from the left or start a new one.</p>
+            </div>
+            {% endif %}
+        </section>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const container = document.getElementById("chatMessages");
+if (container) {
+    container.scrollTop = container.scrollHeight;
+}
+
+const ACTIVE_CHAT_ID = {{ active_chat_id | tojson }};
+const CURRENT_USER_ID = {{ g.user.id | tojson }};
+const CURRENT_USERNAME = {{ g.user.username | tojson }};
+const composer = document.getElementById("chatComposer");
+const messageInput = composer ? composer.querySelector("input[name='body']") : null;
+const userSearchInput = document.getElementById("userSearchInput");
+const userList = document.getElementById("userList");
+const socket = io();
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function renderMessage(message) {
+    if (!container) return;
+    if (!message || message.chat_id !== ACTIVE_CHAT_ID) return;
+    if (container.querySelector(`[data-message-id=\"${message.id}\"]`)) return;
+
+    const mine = Number(message.sender_id) === Number(CURRENT_USER_ID);
+    const row = document.createElement("article");
+    row.className = `message-row${mine ? " message-row--me" : ""}`;
+    row.setAttribute("data-message-id", String(message.id));
+    row.innerHTML = `
+        <div class="message-bubble${mine ? " message-bubble--me" : ""}">
+            <p class="message-text mb-1">${escapeHtml(message.body)}</p>
+            <p class="message-meta mb-0">${escapeHtml(message.sender_username)} · ${escapeHtml(message.created_at)}</p>
+        </div>
+    `;
+    container.appendChild(row);
+    container.scrollTop = container.scrollHeight;
+}
+
+socket.on("connect", () => {
+    if (ACTIVE_CHAT_ID) {
+        socket.emit("join_chat", { room: `conversation_${ACTIVE_CHAT_ID}` });
+    }
+});
+
+socket.on("new_message", (message) => {
+    renderMessage(message);
+});
+socket.on("receive_message", (message) => {
+    renderMessage(message);
+});
+
+if (composer && messageInput && ACTIVE_CHAT_ID) {
+    composer.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const body = messageInput.value.trim();
+        if (!body) return;
+        socket.emit("send_message", {
+            room: `conversation_${ACTIVE_CHAT_ID}`,
+            message: body,
+            sender: CURRENT_USERNAME
+        });
+        messageInput.value = "";
+    });
+}
+
+if (userSearchInput && userList) {
+    userSearchInput.addEventListener("input", () => {
+        const query = userSearchInput.value.trim().toLowerCase();
+        const items = userList.querySelectorAll(".chat-contact-item");
+        items.forEach((item) => {
+            const name = item.getAttribute("data-user-name") || "";
+            item.style.display = name.includes(query) ? "" : "none";
+        });
+    });
+}
+</script>
+{% endblock %}

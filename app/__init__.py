@@ -3,6 +3,7 @@ from pathlib import Path
 
 from flask import Flask, g, request
 from flask_login import LoginManager
+from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 
 from .db import init_app, init_db
@@ -21,6 +22,7 @@ from .services import migrate_json_if_needed
 
 db = SQLAlchemy()
 login_manager = LoginManager()
+socketio = SocketIO()
 
 
 @login_manager.user_loader
@@ -87,6 +89,11 @@ def create_app(test_config=None):
     init_app(app)
     db.init_app(app)
     login_manager.init_app(app)
+    socketio.init_app(
+        app,
+        cors_allowed_origins="*",
+        async_mode="threading",
+    )
     login_manager.login_view = "main.login"
 
     @app.context_processor
@@ -105,8 +112,10 @@ def create_app(test_config=None):
         }
 
     from .routes import bp
+    from .sockets import register_socket_events
 
     app.register_blueprint(bp)
+    register_socket_events(socketio)
 
     with app.app_context():
         from . import models  # noqa: F401
