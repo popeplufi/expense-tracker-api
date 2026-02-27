@@ -37,6 +37,19 @@ Open: `http://127.0.0.1:5001`
 - Health endpoint: `GET /healthz`
 - Readiness endpoint (checks DB): `GET /readyz`
 
+## Professional Architecture Layer
+
+A new production-grade gateway scaffold is included in `gateway/`:
+
+- Node.js + Fastify API gateway
+- JWT auth with rotating refresh tokens
+- Redis-backed rate limiting
+- Audit logging to PostgreSQL
+- WebSocket + Redis pub/sub adapter for horizontal scaling
+- Device key registration and pre-key bundle retrieval for async encrypted messaging
+
+See: `gateway/README.md`
+
 ## Push Notifications (Production)
 
 1. Generate VAPID keys:
