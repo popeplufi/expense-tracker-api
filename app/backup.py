@@ -6,13 +6,28 @@ from pathlib import Path
 _LOCK = threading.Lock()
 
 
+def _first_writable_dir(candidates):
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return path
+    return None
+
+
 def _resolve_backup_dir(config):
     explicit = str(config.get("BACKUP_DIR", "")).strip()
-    if explicit:
-        return Path(explicit)
-    if Path("/var/data").exists():
-        return Path("/var/data/backups")
-    return Path(config["DATABASE"]).resolve().parent / "backups"
+    database_backup_dir = Path(config["DATABASE"]).resolve().parent / "backups"
+
+    preferred = [explicit] if explicit else []
+    preferred.append("/var/data/backups")
+    preferred.append(str(database_backup_dir))
+
+    return _first_writable_dir(preferred) or database_backup_dir
 
 
 def _should_backup_now(backup_dir, min_interval_seconds):
@@ -49,7 +64,10 @@ def maybe_backup_database(config):
     min_interval = int(config.get("BACKUP_MIN_INTERVAL_SECONDS", 120))
     keep_count = int(config.get("BACKUP_KEEP_COUNT", 20))
 
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
     if not _should_backup_now(backup_dir, min_interval):
         return None
 
@@ -75,7 +93,10 @@ def restore_latest_backup_if_needed(config):
 
     database_path = Path(config["DATABASE"]).resolve()
     backup_dir = _resolve_backup_dir(config)
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
 
     db_exists_and_non_empty = database_path.exists() and database_path.stat().st_size > 0
     if db_exists_and_non_empty:
