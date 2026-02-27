@@ -561,8 +561,15 @@ def send_friend_request_route(user_id):
         flash("User not found.", "error")
         return redirect(url_for("main.contacts_page"))
 
-    if repository.send_friend_request(g.user["id"], user_id):
+    result = repository.send_friend_request(g.user["id"], user_id)
+    if result == "sent":
         flash("Friend request sent.", "success")
+    elif result == "accepted_reciprocal":
+        flash("Friend request accepted automatically. You are now friends.", "success")
+    elif result == "already_friends":
+        flash("You are already friends.", "success")
+    elif result == "pending_exists":
+        flash("A pending request already exists.", "error")
     else:
         flash("Unable to send request.", "error")
     return redirect(url_for("main.contacts_page"))

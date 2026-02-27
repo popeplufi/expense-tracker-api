@@ -390,6 +390,8 @@ def list_other_users(user_id):
 def search_users_by_username(search_term, exclude_user_id, limit=30):
     db = get_db()
     query = str(search_term or "").strip()
+    # Allow user-style handles like "@admin" in search input.
+    query = query.lstrip("@")
     if not query:
         return []
     rows = db.execute(
@@ -470,11 +472,41 @@ def list_outgoing_friend_request_receiver_ids(user_id):
 
 def send_friend_request(sender_id, receiver_id):
     if sender_id == receiver_id:
-        return False
+        return "invalid"
     if are_friends(sender_id, receiver_id):
-        return False
+        return "already_friends"
 
     db = get_db()
+    reverse_pending = db.execute(
+        """
+        SELECT id
+        FROM friend_requests
+        WHERE sender_id = ? AND receiver_id = ? AND status = 'pending'
+        LIMIT 1
+        """,
+        (receiver_id, sender_id),
+    ).fetchone()
+    if reverse_pending:
+        user1 = min(sender_id, receiver_id)
+        user2 = max(sender_id, receiver_id)
+        db.execute(
+            """
+            UPDATE friend_requests
+            SET status = 'accepted', responded_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (reverse_pending["id"],),
+        )
+        db.execute(
+            """
+            INSERT OR IGNORE INTO friendships (user1_id, user2_id)
+            VALUES (?, ?)
+            """,
+            (user1, user2),
+        )
+        db.commit()
+        return "accepted_reciprocal"
+
     existing = db.execute(
         """
         SELECT id
@@ -489,7 +521,7 @@ def send_friend_request(sender_id, receiver_id):
         (sender_id, receiver_id, receiver_id, sender_id),
     ).fetchone()
     if existing:
-        return False
+        return "pending_exists"
 
     db.execute(
         """
@@ -499,7 +531,7 @@ def send_friend_request(sender_id, receiver_id):
         (sender_id, receiver_id),
     )
     db.commit()
-    return True
+    return "sent"
 
 
 def respond_friend_request(request_id, receiver_id, accept):
