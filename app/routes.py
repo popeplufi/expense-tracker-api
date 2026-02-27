@@ -58,6 +58,35 @@ def healthz():
     return jsonify({"ok": True}), 200
 
 
+@bp.get("/readyz")
+def readyz():
+    try:
+        repository.count_users()
+    except Exception as exc:  # pragma: no cover - runtime readiness guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "status": "degraded",
+                    "error": str(exc),
+                    "version": current_app.config.get("APP_VERSION", "dev"),
+                }
+            ),
+            503,
+        )
+
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "status": "ready",
+                "version": current_app.config.get("APP_VERSION", "dev"),
+            }
+        ),
+        200,
+    )
+
+
 def _jwt_expiration_minutes():
     raw_minutes = current_app.config.get("JWT_EXPIRES_MINUTES", "10080")
     try:

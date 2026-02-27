@@ -86,6 +86,7 @@ def create_app(test_config=None):
             "You are a concise, helpful assistant inside a chat app.",
         ),
         OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", ""),
+        APP_VERSION=os.environ.get("APP_VERSION", "dev"),
     )
     if test_config:
         app.config.update(test_config)

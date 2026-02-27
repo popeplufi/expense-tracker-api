@@ -34,6 +34,8 @@ Open: `http://127.0.0.1:5001`
 
 - `Render`, `Railway`, and `VPS` instructions: see `DEPLOY.md`.
 - Production start command: `gunicorn run:app -c gunicorn.conf.py`
+- Health endpoint: `GET /healthz`
+- Readiness endpoint (checks DB): `GET /readyz`
 
 ## Push Notifications (Production)
 
