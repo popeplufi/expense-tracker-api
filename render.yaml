@@ -3,7 +3,7 @@ services:
     name: expense-tracker-pro
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -k eventlet -w 1 run:app -c gunicorn.conf.py
+    startCommand: gunicorn -k gthread -w 1 --threads 8 run:app -c gunicorn.conf.py
     healthCheckPath: /login
     disks:
       - name: app-data

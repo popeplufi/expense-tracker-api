@@ -1,1 +1,1 @@
-web: gunicorn -k eventlet -w 1 run:app -c gunicorn.conf.py
+web: gunicorn -k gthread -w 1 --threads 8 run:app -c gunicorn.conf.py
