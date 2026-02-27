@@ -50,6 +50,16 @@ function InsightsPage({ expenses, loading, error }) {
     return { byCategory, byMonth };
   }, [expenses]);
 
+  const totalSpend = useMemo(
+    () => expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+    [expenses]
+  );
+  const averageMonthly = useMemo(() => {
+    const months = new Set(expenses.map((item) => String(item.expense_date || "").slice(0, 7)));
+    const monthCount = Math.max(months.size, 1);
+    return totalSpend / monthCount;
+  }, [expenses, totalSpend]);
+
   if (loading) {
     return (
       <div className="grid gap-4 lg:grid-cols-2">
@@ -72,11 +82,25 @@ function InsightsPage({ expenses, loading, error }) {
   const monthMax = byMonth.reduce((max, item) => Math.max(max, item.total), 1);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
+      <section className="grid gap-4 sm:grid-cols-2">
+        <article className="surface-card">
+          <p className="stat-card__label">Total tracked</p>
+          <p className="stat-card__value text-brand-700 dark:text-brand-300">{formatAmount(totalSpend)}</p>
+        </article>
+        <article className="surface-card">
+          <p className="stat-card__label">Average per month</p>
+          <p className="stat-card__value text-ocean-700 dark:text-ocean-300">
+            {formatAmount(averageMonthly)}
+          </p>
+        </article>
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
       <section className="surface-card">
-        <h2 className="font-display text-xl font-semibold">By category</h2>
+        <h2 className="font-display text-xl font-semibold">Category report</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Animated bars for spending share per category.
+          See which categories drive most spending.
         </p>
 
         <div className="mt-5 space-y-4">
@@ -99,7 +123,7 @@ function InsightsPage({ expenses, loading, error }) {
                       whileInView={{ width: `${width}%` }}
                       viewport={{ once: true }}
                       transition={{ duration: 0.55, ease: "easeOut" }}
-                      className="h-2 rounded-full bg-gradient-to-r from-brand-500 to-ocean-500"
+                      className="h-2 rounded-full bg-gradient-to-r from-brand-500 via-brand-400 to-ocean-500"
                     />
                   </div>
                 </div>
@@ -110,9 +134,9 @@ function InsightsPage({ expenses, loading, error }) {
       </section>
 
       <section className="surface-card">
-        <h2 className="font-display text-xl font-semibold">Monthly momentum</h2>
+        <h2 className="font-display text-xl font-semibold">Monthly report</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Compact timeline bars for trend tracking.
+          Month-by-month trends to guide budget planning.
         </p>
 
         <div className="mt-5 space-y-4">
@@ -144,6 +168,7 @@ function InsightsPage({ expenses, loading, error }) {
           )}
         </div>
       </section>
+      </div>
     </div>
   );
 }

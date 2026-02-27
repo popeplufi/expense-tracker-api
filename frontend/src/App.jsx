@@ -49,6 +49,15 @@ function AnimatedPage({ children }) {
   );
 }
 
+function TrendStat({ label, value }) {
+  return (
+    <article className="social-stat">
+      <p className="social-stat__label">{label}</p>
+      <p className="social-stat__value">{value}</p>
+    </article>
+  );
+}
+
 function ProtectedRoute({ isReady, isAuthenticated, children }) {
   if (!isReady) {
     return (
@@ -215,29 +224,53 @@ function App() {
     return Object.entries(totals).sort((a, b) => b[1] - a[1])[0][0];
   }, [expenses]);
 
+  const monthlyTotal = useMemo(() => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return expenses
+      .filter((expense) => String(expense.expense_date || "").startsWith(currentMonth))
+      .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  }, [expenses]);
+
+  const activeCategories = useMemo(
+    () => new Set(expenses.map((expense) => expense.category || "Uncategorized")).size,
+    [expenses]
+  );
+
+  const latestTransactions = useMemo(
+    () =>
+      [...expenses]
+        .sort((a, b) => (Date.parse(b.expense_date || "") || 0) - (Date.parse(a.expense_date || "") || 0))
+        .slice(0, 4),
+    [expenses]
+  );
+
   const isAuthenticated = Boolean(token && user);
+  const userInitial = (user?.username || "U").slice(0, 1).toUpperCase();
 
   return (
-    <div className="min-h-screen bg-mesh-light text-slate-900 transition-colors dark:bg-mesh-dark dark:text-slate-100">
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+    <div className="min-h-screen bg-scene text-slate-900 transition-colors dark:bg-scene-dark dark:text-slate-100">
+      <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6">
         <motion.header
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, ease: "easeOut" }}
-          className="surface-card mb-6 flex flex-wrap items-center justify-between gap-4"
+          className="topbar mb-6"
         >
-          <div>
-            <p className="font-display text-lg font-semibold tracking-tight">Plufi Finance</p>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              {isAuthenticated
-                ? "JWT-secured expense feed with motion and dark mode."
-                : "Login with JWT to access your private expense feed."}
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-brand-500 to-ocean-500 text-sm font-bold text-white">
+              PF
+            </div>
+            <div>
+              <p className="font-display text-lg font-semibold tracking-tight">Plufi Budget</p>
+              <p className="text-xs text-slate-500 dark:text-slate-300">
+                Smart budgeting and expense tracking
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {isAuthenticated && (
-              <nav className="flex items-center rounded-full border border-slate-200/80 bg-white/70 p-1 dark:border-slate-700 dark:bg-slate-900/70">
+              <nav className="hidden items-center rounded-full border border-slate-200/80 bg-white/70 p-1 dark:border-slate-700 dark:bg-slate-900/70 md:flex">
                 <NavLink
                   to="/"
                   end
@@ -249,7 +282,7 @@ function App() {
                     }`
                   }
                 >
-                  Feed
+                  Home
                 </NavLink>
                 <NavLink
                   to="/insights"
@@ -271,7 +304,7 @@ function App() {
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 hover:shadow dark:border-slate-700 dark:bg-slate-900/75"
             >
-              {theme === "dark" ? "Switch to light" : "Switch to dark"}
+              {theme === "dark" ? "Light" : "Dark"}
             </button>
 
             {isAuthenticated && (
@@ -286,80 +319,132 @@ function App() {
                 Logout
               </button>
             )}
+
+            {isAuthenticated && (
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-ocean-500 to-brand-500 text-sm font-bold text-white">
+                {userInitial}
+              </div>
+            )}
           </div>
         </motion.header>
 
-        {isAuthenticated && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.08, duration: 0.3 }}
-            className="mb-6 rounded-3xl border border-brand-200/70 bg-white/70 px-5 py-4 shadow-soft backdrop-blur-md dark:border-brand-500/30 dark:bg-slate-900/60"
-          >
-            <p className="text-sm text-slate-600 dark:text-slate-300">Top category right now</p>
-            <p className="font-display text-2xl font-semibold text-brand-700 dark:text-brand-300">
-              {topCategory}
-            </p>
-          </motion.div>
-        )}
+        <div className={isAuthenticated ? "social-layout" : "social-layout social-layout--auth"}>
+          {isAuthenticated && (
+            <motion.aside
+              initial={{ opacity: 0, x: -14 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.05, duration: 0.3 }}
+              className="surface-card hidden xl:block"
+            >
+              <p className="sidebar-heading">Menu</p>
+              <nav className="mt-4 grid gap-2">
+                <NavLink to="/" end className={({ isActive }) => `side-link ${isActive ? "active" : ""}`}>
+                  Dashboard
+                </NavLink>
+                <NavLink
+                  to="/insights"
+                  className={({ isActive }) => `side-link ${isActive ? "active" : ""}`}
+                >
+                  Reports
+                </NavLink>
+              </nav>
+              <p className="sidebar-heading mt-7">This month</p>
+              <div className="mt-4 grid gap-3">
+                <TrendStat label="Top category" value={topCategory} />
+                <TrendStat label="This month" value={`₦${Math.round(monthlyTotal).toLocaleString()}`} />
+                <TrendStat label="Categories" value={String(activeCategories)} />
+              </div>
+            </motion.aside>
+          )}
 
-        <AnimatePresence mode="wait">
-          <Routes location={location} key={location.pathname}>
-            <Route
-              path="/auth/login"
-              element={
-                isAuthenticated ? (
-                  <Navigate to="/" replace />
-                ) : (
-                  <AnimatedPage>
-                    <LoginPage apiBaseUrl={API_BASE_URL} onAuthSuccess={onAuthSuccess} />
-                  </AnimatedPage>
-                )
-              }
-            />
-            <Route
-              path="/auth/register"
-              element={
-                isAuthenticated ? (
-                  <Navigate to="/" replace />
-                ) : (
-                  <AnimatedPage>
-                    <RegisterPage apiBaseUrl={API_BASE_URL} onAuthSuccess={onAuthSuccess} />
-                  </AnimatedPage>
-                )
-              }
-            />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute isReady={authReady} isAuthenticated={isAuthenticated}>
-                  <AnimatedPage>
-                    <DashboardPage
-                      expenses={expenses}
-                      loading={loading}
-                      error={error}
-                      onRefresh={loadExpenses}
-                    />
-                  </AnimatedPage>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/insights"
-              element={
-                <ProtectedRoute isReady={authReady} isAuthenticated={isAuthenticated}>
-                  <AnimatedPage>
-                    <InsightsPage expenses={expenses} loading={loading} error={error} />
-                  </AnimatedPage>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="*"
-              element={<Navigate to={isAuthenticated ? "/" : "/auth/login"} replace />}
-            />
-          </Routes>
-        </AnimatePresence>
+          <main className="min-w-0">
+            <AnimatePresence mode="wait">
+              <Routes location={location} key={location.pathname}>
+                <Route
+                  path="/auth/login"
+                  element={
+                    isAuthenticated ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <AnimatedPage>
+                        <LoginPage apiBaseUrl={API_BASE_URL} onAuthSuccess={onAuthSuccess} />
+                      </AnimatedPage>
+                    )
+                  }
+                />
+                <Route
+                  path="/auth/register"
+                  element={
+                    isAuthenticated ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <AnimatedPage>
+                        <RegisterPage apiBaseUrl={API_BASE_URL} onAuthSuccess={onAuthSuccess} />
+                      </AnimatedPage>
+                    )
+                  }
+                />
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute isReady={authReady} isAuthenticated={isAuthenticated}>
+                      <AnimatedPage>
+                        <DashboardPage
+                          expenses={expenses}
+                          loading={loading}
+                          error={error}
+                          onRefresh={loadExpenses}
+                        />
+                      </AnimatedPage>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/insights"
+                  element={
+                    <ProtectedRoute isReady={authReady} isAuthenticated={isAuthenticated}>
+                      <AnimatedPage>
+                        <InsightsPage expenses={expenses} loading={loading} error={error} />
+                      </AnimatedPage>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="*"
+                  element={<Navigate to={isAuthenticated ? "/" : "/auth/login"} replace />}
+                />
+              </Routes>
+            </AnimatePresence>
+          </main>
+
+          {isAuthenticated && (
+            <motion.aside
+              initial={{ opacity: 0, x: 14 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.12, duration: 0.3 }}
+              className="surface-card hidden lg:block"
+            >
+              <p className="sidebar-heading">Latest entries</p>
+              {latestTransactions.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500 dark:text-slate-300">No recent transactions yet.</p>
+              ) : (
+                <div className="mt-4 grid gap-3">
+                  {latestTransactions.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200/80 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70"
+                    >
+                      <p className="truncate text-sm font-semibold">{item.name || "Untitled expense"}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+                        {item.category || "Uncategorized"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.aside>
+          )}
+        </div>
       </div>
     </div>
   );

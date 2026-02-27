@@ -10,29 +10,34 @@ export default {
       },
       colors: {
         brand: {
-          50: "#fef6ef",
-          100: "#fde8d8",
-          200: "#fbd0b1",
-          300: "#f8b180",
-          400: "#f38a4f",
-          500: "#ea6a2a",
-          600: "#d6541f",
-          700: "#b2441d",
+          50: "#ecfdf5",
+          100: "#d1fae5",
+          200: "#a7f3d0",
+          300: "#6ee7b7",
+          400: "#34d399",
+          500: "#10b981",
+          600: "#059669",
+          700: "#047857",
         },
         ocean: {
-          50: "#eefcfb",
-          100: "#d5f6f4",
-          200: "#abede8",
-          300: "#78e0d9",
-          400: "#43cabf",
-          500: "#21aba1",
-          600: "#188b84",
+          50: "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
         },
       },
       boxShadow: {
         soft: "0 20px 45px -22px rgba(17, 24, 39, 0.35)",
       },
       backgroundImage: {
+        scene:
+          "radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.22), transparent 34%), radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.22), transparent 36%), linear-gradient(160deg, #f6fbff 0%, #f8fffc 54%, #f4fbf9 100%)",
+        "scene-dark":
+          "radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.22), transparent 34%), radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.22), transparent 36%), linear-gradient(165deg, #0b1324 0%, #101a2f 48%, #0d1a28 100%)",
         "mesh-light":
           "radial-gradient(circle at 20% 10%, rgba(234, 106, 42, 0.24), transparent 36%), radial-gradient(circle at 80% 0%, rgba(67, 202, 191, 0.28), transparent 34%), linear-gradient(160deg, #f7fafc 0%, #fff7f1 50%, #f1fffc 100%)",
         "mesh-dark":
