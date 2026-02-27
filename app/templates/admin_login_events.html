@@ -6,7 +6,15 @@
 <section class="section">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="mb-0">Login Events</h2>
-        <span class="text-secondary small">Total: {{ total }}</span>
+        <div class="d-flex align-items-center gap-2">
+            <a
+                class="btn btn-outline-secondary btn-sm"
+                href="{{ url_for('main.admin_login_events_api', page=page, per_page=per_page, username=filters.username, source=filters.source, success=filters.success) }}"
+            >
+                Open API JSON
+            </a>
+            <span class="text-secondary small">Total: {{ total }}</span>
+        </div>
     </div>
 
     <form method="get" class="card p-3 mb-3 dark-card">
