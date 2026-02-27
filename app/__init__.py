@@ -127,6 +127,8 @@ def create_app(test_config=None):
         app,
         cors_allowed_origins="*",
         async_mode=None,
+        logger=os.environ.get("SOCKETIO_LOGGER") == "1",
+        engineio_logger=os.environ.get("ENGINEIO_LOGGER") == "1",
     )
     login_manager.login_view = "main.login"
 
