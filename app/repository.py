@@ -925,6 +925,50 @@ def mark_messages_seen(chat_id, viewer_id):
     return message_ids
 
 
+def unread_count_for_chat(chat_id, viewer_id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM messages
+        WHERE COALESCE(conversation_id, chat_id) = ?
+          AND sender_id != ?
+          AND COALESCE(is_seen, 0) = 0
+        """,
+        (chat_id, viewer_id),
+    ).fetchone()
+    return int(row["count"]) if row else 0
+
+
+def unread_summary_for_user(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            c.id AS chat_id,
+            (
+                SELECT COUNT(*)
+                FROM messages m
+                WHERE COALESCE(m.conversation_id, m.chat_id) = c.id
+                  AND m.sender_id != ?
+                  AND COALESCE(m.is_seen, 0) = 0
+            ) AS unread_count
+        FROM chats c
+        JOIN chat_members cm ON cm.chat_id = c.id
+        WHERE cm.user_id = ?
+        ORDER BY c.id ASC
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    items = []
+    total_unread = 0
+    for row in rows:
+        count = int(row["unread_count"] or 0)
+        items.append({"chat_id": int(row["chat_id"]), "unread_count": count})
+        total_unread += count
+    return {"items": items, "total_unread": total_unread}
+
+
 def upsert_push_subscription(user_id, endpoint, p256dh, auth, user_agent=None):
     db = get_db()
     db.execute(

@@ -30,12 +30,13 @@
                     <a
                         href="{{ url_for('main.chat_home', chat=chat.id) }}"
                         class="chat-list-item {% if active_chat_id == chat.id %}chat-list-item--active{% endif %}"
+                        data-chat-id="{{ chat.id }}"
                         data-chat-name="{{ (chat.peer_username or chat.name or 'Chat') | lower }}"
                     >
                         <div class="chat-list-item__title-row">
                             <div class="chat-list-item__title">{{ chat.peer_username or chat.name or "Chat" }}</div>
                             {% if chat.unread_count and chat.unread_count > 0 %}
-                            <span class="chat-unread-badge">{{ chat.unread_count }}</span>
+                            <span class="chat-unread-badge" data-unread-badge="{{ chat.id }}">{{ chat.unread_count }}</span>
                             {% endif %}
                         </div>
                         <div class="chat-list-item__meta">{{ chat.last_message or "No messages yet" }}</div>
@@ -157,6 +158,7 @@ if (container) {
 const ACTIVE_CHAT_ID = {{ active_chat_id | tojson }};
 const CURRENT_USER_ID = {{ g.user.id | tojson }};
 const CURRENT_USERNAME = {{ g.user.username | tojson }};
+const chatList = document.getElementById("chatList");
 const composer = document.getElementById("chatComposer");
 const messageInput = composer ? composer.querySelector("input[name='body']") : null;
 const userSearchInput = document.getElementById("userSearchInput");
@@ -185,6 +187,7 @@ let remoteStream = null;
 let pendingOffer = null;
 let callMode = "audio";
 let isMuted = false;
+const optimisticMessages = new Map();
 const rtcConfig = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
@@ -250,9 +253,59 @@ function escapeHtml(value) {
         .replace(/'/g, "&#039;");
 }
 
+function updateUnreadSummary(summary) {
+    if (!chatList || !summary || !Array.isArray(summary.items)) return;
+
+    const unreadByChat = new Map();
+    summary.items.forEach((item) => {
+        const chatId = Number(item.chat_id);
+        unreadByChat.set(chatId, Number(item.unread_count || 0));
+    });
+
+    chatList.querySelectorAll(".chat-list-item[data-chat-id]").forEach((item) => {
+        const chatId = Number(item.getAttribute("data-chat-id"));
+        const unreadCount = unreadByChat.get(chatId) || 0;
+        const titleRow = item.querySelector(".chat-list-item__title-row");
+        if (!titleRow) return;
+        let badge = titleRow.querySelector(".chat-unread-badge");
+        if (unreadCount <= 0) {
+            if (badge) badge.remove();
+            return;
+        }
+        if (!badge) {
+            badge = document.createElement("span");
+            badge.className = "chat-unread-badge";
+            badge.setAttribute("data-unread-badge", String(chatId));
+            titleRow.appendChild(badge);
+        }
+        badge.textContent = String(unreadCount);
+    });
+
+    const total = Number(summary.total_unread || 0);
+    document.title = total > 0 ? `(${total}) Chats` : "Chats";
+}
+
+function renderOptimisticMessage(clientMsgId, body) {
+    if (!container || !clientMsgId) return;
+    const row = document.createElement("article");
+    row.className = "message-row message-row--me";
+    row.setAttribute("data-client-message-id", clientMsgId);
+    row.innerHTML = `
+        <div class="message-bubble message-bubble--me">
+            <p class="message-text mb-1">${escapeHtml(body)}</p>
+            <p class="message-meta mb-0">
+                ${escapeHtml(CURRENT_USERNAME)} · sending...
+                <span class="message-tick">...</span>
+            </p>
+        </div>
+    `;
+    container.appendChild(row);
+    container.scrollTop = container.scrollHeight;
+}
+
 function renderMessage(message) {
     if (!container) return;
-    if (!message || message.chat_id !== ACTIVE_CHAT_ID) return;
+    if (!message || Number(message.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
     if (container.querySelector(`[data-message-id=\"${message.id}\"]`)) return;
 
     const mine = Number(message.sender_id) === Number(CURRENT_USER_ID);
@@ -419,6 +472,32 @@ socket.on("receive_message", (message) => {
     renderMessage(message);
     maybeNotify(message);
 });
+socket.on("message_sent", (payload) => {
+    if (!payload || !payload.message) return;
+    const clientMsgId = payload.client_msg_id ? String(payload.client_msg_id) : null;
+    if (clientMsgId) {
+        optimisticMessages.delete(clientMsgId);
+        const pendingRow = container
+            ? container.querySelector(`[data-client-message-id="${clientMsgId}"]`)
+            : null;
+        if (pendingRow) pendingRow.remove();
+    }
+    renderMessage(payload.message);
+});
+socket.on("unread_summary", (summary) => {
+    updateUnreadSummary(summary);
+});
+socket.on("socket_error", (err) => {
+    const message = (err && err.message) ? String(err.message) : "Action failed.";
+    if (typingIndicator) {
+        typingIndicator.textContent = message;
+        window.setTimeout(() => {
+            if (typingIndicator.textContent === message) {
+                typingIndicator.textContent = "";
+            }
+        }, 2200);
+    }
+});
 
 socket.on("typing_start", (event) => {
     if (!event || Number(event.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
@@ -500,11 +579,27 @@ if (composer && messageInput && ACTIVE_CHAT_ID) {
         event.preventDefault();
         const body = messageInput.value.trim();
         if (!body) return;
+        const clientMsgId = `c_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        optimisticMessages.set(clientMsgId, { body, createdAt: Date.now() });
+        renderOptimisticMessage(clientMsgId, body);
         socket.emit("send_message", {
             room: `conversation_${ACTIVE_CHAT_ID}`,
-            message: body,
-            sender: CURRENT_USERNAME
+            body,
+            sender: CURRENT_USERNAME,
+            client_msg_id: clientMsgId,
         });
+        window.setTimeout(() => {
+            if (!optimisticMessages.has(clientMsgId)) return;
+            optimisticMessages.delete(clientMsgId);
+            const pendingRow = container
+                ? container.querySelector(`[data-client-message-id="${clientMsgId}"]`)
+                : null;
+            if (!pendingRow) return;
+            const tick = pendingRow.querySelector(".message-tick");
+            if (tick) tick.textContent = "!";
+            const meta = pendingRow.querySelector(".message-meta");
+            if (meta) meta.textContent = `${CURRENT_USERNAME} · failed to send`;
+        }, 12000);
         messageInput.value = "";
         if (typingState) {
             typingState = false;
