@@ -1,4 +1,3 @@
-from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
@@ -430,51 +429,35 @@ def profile():
 
 
 @bp.get("/")
+@bp.get("/insights")
+@bp.get("/auth/login")
+@bp.get("/auth/register")
+@bp.get("/frontend")
+def frontend():
+    return render_template("frontend.html")
+
+
 @bp.get("/dashboard")
 @login_required
 def dashboard():
-    selected_category = request.args.get("category", "").strip()
-    selected_month = request.args.get("month", "").strip()
-    category_filter = selected_category or None
-    month_filter = selected_month or None
-
-    dashboard = _dashboard_payload(
+    dashboard_payload = _dashboard_payload(
         user_id=g.user["id"],
-        category_filter=category_filter,
-        month_filter=month_filter,
         currency_code=g.currency,
         limit=PAGE_SIZE_DEFAULT,
         offset=0,
     )
-    current_month = date.today().strftime("%Y-%m")
-    monthly_total = 0
-    for row in dashboard["monthly_summary"]:
-        if row.get("month") == current_month:
-            monthly_total = row.get("total", 0)
-            break
-    expenses = dashboard["expenses"]
-
-    category_data = defaultdict(float)
-    for expense in expenses:
-        category_data[expense["category"]] += expense["amount"]
-
-    labels = list(category_data.keys())
-    values = list(category_data.values())
-    total = dashboard["totals"]["overall"]
-
+    expenses = dashboard_payload["expenses"]
     return render_template(
         "dashboard.html",
         expenses=expenses,
-        total=total,
-        monthly_total=monthly_total,
-        labels=labels,
-        values=values,
+        total_expense=dashboard_payload["totals"]["overall"],
     )
 
 
-@bp.get("/frontend")
-def frontend():
-    return render_template("frontend.html")
+@bp.get("/add-expense")
+@login_required
+def add_expense_page():
+    return render_template("add_expense.html")
 
 
 @bp.post("/expenses")
