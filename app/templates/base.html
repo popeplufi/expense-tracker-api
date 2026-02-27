@@ -17,7 +17,10 @@
             <div class="d-flex align-items-center gap-2">
                 {% if g.user %}
                     <span class="app-user">@{{ g.user.username }}</span>
-                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.profile') }}">Profile</a>
+                    {% if g.is_admin %}
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.admin_login_events_page') }}">Admin</a>
+                    {% endif %}
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.settings_page') }}">Settings</a>
                     <form method="post" action="{{ url_for('main.logout') }}" class="d-inline">
                         <button type="submit" class="btn btn-dark btn-sm">Logout</button>
                     </form>
@@ -50,7 +53,7 @@
         <a href="{{ url_for('main.chat_home') }}" class="mobile-bottom-nav__item {% if request.path == '/' %}mobile-bottom-nav__item--active{% endif %}">Chats</a>
         <a href="{{ url_for('main.contacts_page') }}" class="mobile-bottom-nav__item {% if request.path == '/contacts' %}mobile-bottom-nav__item--active{% endif %}">Contacts</a>
         <a href="{{ url_for('main.status_page') }}" class="mobile-bottom-nav__item {% if request.path == '/status' %}mobile-bottom-nav__item--active{% endif %}">Status</a>
-        <a href="{{ url_for('main.profile') }}" class="mobile-bottom-nav__item {% if request.path == '/profile' %}mobile-bottom-nav__item--active{% endif %}">Profile</a>
+        <a href="{{ url_for('main.settings_page') }}" class="mobile-bottom-nav__item {% if request.path == '/settings' %}mobile-bottom-nav__item--active{% endif %}">Settings</a>
     </nav>
     {% endif %}
 

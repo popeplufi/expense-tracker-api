@@ -1,15 +1,81 @@
 {% extends "base.html" %}
 
-{% block title %}Status{% endblock %}
+{% block title %}Updates{% endblock %}
 
 {% block content %}
 <section class="section">
-    <h2 class="mb-1">Status</h2>
-    <p class="text-secondary mb-3">Quick status area (placeholder).</p>
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h2 class="mb-0">Updates</h2>
+        <span class="text-secondary small">Status</span>
+    </div>
 
-    <div class="card p-4 text-center">
-        <h5 class="mb-2">No status updates yet</h5>
-        <p class="text-secondary mb-0">You can add story-style status updates here next.</p>
+    <div class="card p-3 mb-3 dark-card">
+        <h6 class="mb-2">Post new status</h6>
+        <form method="post" action="{{ url_for('main.post_status') }}" class="d-grid gap-2" enctype="multipart/form-data">
+            <textarea name="content" class="form-control" rows="2" maxlength="280" placeholder="What's happening?"></textarea>
+            <input type="file" class="form-control" name="media" accept="image/*,video/*">
+            <div class="d-flex justify-content-end">
+                <button class="btn btn-primary" type="submit">Post</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card p-3 mb-3 dark-card">
+        <h6 class="mb-2">My status</h6>
+        <div class="status-strip">
+            {% if my_statuses %}
+                {% for s in my_statuses %}
+                <article class="status-card status-card--mine">
+                    <p class="status-card__name">My Status</p>
+                    {% if s.media_path and s.media_type and s.media_type.startswith('image/') %}
+                    <img class="status-card__media" src="{{ url_for('static', filename=s.media_path) }}" alt="Status image">
+                    {% elif s.media_path and s.media_type and s.media_type.startswith('video/') %}
+                    <video class="status-card__media" controls preload="metadata">
+                        <source src="{{ url_for('static', filename=s.media_path) }}" type="{{ s.media_type }}">
+                    </video>
+                    {% endif %}
+                    {% if s.content %}
+                    <p class="status-card__text">{{ s.content }}</p>
+                    {% endif %}
+                    <p class="status-card__time">{{ s.created_at }}</p>
+                </article>
+                {% endfor %}
+            {% else %}
+                <article class="status-card status-card--empty">
+                    <p class="status-card__name">No active status</p>
+                    <p class="status-card__text">Post one to appear here for 24h.</p>
+                </article>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card p-3 dark-card">
+        <h6 class="mb-2">Friends status</h6>
+        <div class="status-strip">
+            {% if contact_statuses %}
+                {% for s in contact_statuses %}
+                <article class="status-card">
+                    <p class="status-card__name">{{ s.username }}</p>
+                    {% if s.media_path and s.media_type and s.media_type.startswith('image/') %}
+                    <img class="status-card__media" src="{{ url_for('static', filename=s.media_path) }}" alt="Status image">
+                    {% elif s.media_path and s.media_type and s.media_type.startswith('video/') %}
+                    <video class="status-card__media" controls preload="metadata">
+                        <source src="{{ url_for('static', filename=s.media_path) }}" type="{{ s.media_type }}">
+                    </video>
+                    {% endif %}
+                    {% if s.content %}
+                    <p class="status-card__text">{{ s.content }}</p>
+                    {% endif %}
+                    <p class="status-card__time">{{ s.created_at }}</p>
+                </article>
+                {% endfor %}
+            {% else %}
+                <article class="status-card status-card--empty">
+                    <p class="status-card__name">No updates</p>
+                    <p class="status-card__text">Your friends have not posted any status yet.</p>
+                </article>
+            {% endif %}
+        </div>
     </div>
 </section>
 {% endblock %}

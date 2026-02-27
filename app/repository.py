@@ -139,6 +139,33 @@ def touch_last_seen(user_id):
     db.commit()
 
 
+def create_login_event(
+    user_id,
+    username,
+    success,
+    ip_address=None,
+    user_agent=None,
+    source="web",
+):
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO login_events (user_id, username, success, ip_address, user_agent, source)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            (username or "").strip() or None,
+            1 if success else 0,
+            (ip_address or "").strip() or None,
+            (user_agent or "").strip() or None,
+            (source or "web").strip() or "web",
+        ),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
 def add_expense(user_id, name, amount, category, expense_date):
     db = get_db()
     cursor = db.execute(
@@ -680,13 +707,20 @@ def list_user_chats(user_id):
                   AND cm2.user_id != ?
                 ORDER BY u.username ASC
                 LIMIT 1
-            ) AS peer_username
+            ) AS peer_username,
+            (
+                SELECT COUNT(*)
+                FROM messages m
+                WHERE COALESCE(m.conversation_id, m.chat_id) = c.id
+                  AND m.sender_id != ?
+                  AND COALESCE(m.is_seen, 0) = 0
+            ) AS unread_count
         FROM chats c
         JOIN chat_members cm ON cm.chat_id = c.id
         WHERE cm.user_id = ?
         ORDER BY COALESCE(last_message_at, c.created_at) DESC, c.id DESC
         """,
-        (user_id, user_id),
+        (user_id, user_id, user_id),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -793,3 +827,183 @@ def get_message_by_id(message_id):
         (message_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def create_status(user_id, content=None, media_path=None, media_type=None):
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO statuses (user_id, content, media_path, media_type, expires_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+24 hours'))
+        """,
+        (user_id, content, media_path, media_type),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def list_active_statuses():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            s.id,
+            s.user_id,
+            s.content,
+            s.media_path,
+            s.media_type,
+            s.created_at,
+            s.expires_at,
+            u.username
+        FROM statuses s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.expires_at > CURRENT_TIMESTAMP
+        ORDER BY s.created_at DESC, s.id DESC
+        """,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_active_statuses_for_user(user_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, user_id, content, media_path, media_type, created_at, expires_at
+        FROM statuses
+        WHERE user_id = ?
+          AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY created_at DESC, id DESC
+        """,
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_messages_seen(chat_id, viewer_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id
+        FROM messages
+        WHERE COALESCE(conversation_id, chat_id) = ?
+          AND sender_id != ?
+          AND COALESCE(is_seen, 0) = 0
+        """,
+        (chat_id, viewer_id),
+    ).fetchall()
+    message_ids = [int(row["id"]) for row in rows]
+    if not message_ids:
+        return []
+    db.execute(
+        """
+        UPDATE messages
+        SET is_seen = 1
+        WHERE COALESCE(conversation_id, chat_id) = ?
+          AND sender_id != ?
+          AND COALESCE(is_seen, 0) = 0
+        """,
+        (chat_id, viewer_id),
+    )
+    db.commit()
+    return message_ids
+
+
+def upsert_push_subscription(user_id, endpoint, p256dh, auth, user_agent=None):
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, endpoint) DO UPDATE SET
+            p256dh = excluded.p256dh,
+            auth = excluded.auth,
+            user_agent = excluded.user_agent,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, endpoint, p256dh, auth, user_agent),
+    )
+    db.commit()
+
+
+def list_push_subscriptions_for_users(user_ids):
+    ids = [int(value) for value in user_ids if value is not None]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT id, user_id, endpoint, p256dh, auth
+        FROM push_subscriptions
+        WHERE user_id IN ({placeholders})
+        """,
+        ids,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_push_subscriptions_for_user(user_id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM push_subscriptions
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+    return int(row["count"]) if row else 0
+
+
+def delete_push_subscription_by_endpoint(user_id, endpoint):
+    db = get_db()
+    cursor = db.execute(
+        """
+        DELETE FROM push_subscriptions
+        WHERE user_id = ? AND endpoint = ?
+        """,
+        (user_id, endpoint),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def list_login_events(limit=50, offset=0, username=None, source=None, success=None):
+    db = get_db()
+    query = """
+    SELECT id, user_id, username, success, ip_address, user_agent, source, created_at
+    FROM login_events
+    WHERE 1=1
+    """
+    params = []
+    if username:
+        query += " AND username LIKE ?"
+        params.append(f"%{username.strip()}%")
+    if source:
+        query += " AND source = ?"
+        params.append(source.strip())
+    if success is not None:
+        query += " AND success = ?"
+        params.append(1 if success else 0)
+
+    query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+    params.extend([_safe_limit(limit, default=50, max_limit=200), _safe_offset(offset)])
+    rows = db.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_login_events(username=None, source=None, success=None):
+    db = get_db()
+    query = "SELECT COUNT(*) AS count FROM login_events WHERE 1=1"
+    params = []
+    if username:
+        query += " AND username LIKE ?"
+        params.append(f"%{username.strip()}%")
+    if source:
+        query += " AND source = ?"
+        params.append(source.strip())
+    if success is not None:
+        query += " AND success = ?"
+        params.append(1 if success else 0)
+    row = db.execute(query, params).fetchone()
+    return int(row["count"]) if row else 0

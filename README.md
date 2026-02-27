@@ -34,3 +34,27 @@ Open: `http://127.0.0.1:5001`
 
 - `Render`, `Railway`, and `VPS` instructions: see `DEPLOY.md`.
 - Production start command: `gunicorn run:app -c gunicorn.conf.py`
+
+## Push Notifications (Production)
+
+1. Generate VAPID keys:
+```bash
+python3 scripts/generate_vapid_keys.py
+```
+2. Set these env vars on your server:
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_CLAIMS_SUB` (must be `mailto:...`)
+3. Ensure HTTPS is enabled on the live domain (service workers require secure context).
+4. Login, open `Settings`, click `Check status`, then `Send test push`.
+5. Optional diagnostics endpoints:
+- `GET /api/push/status`
+- `POST /api/push/test`
+
+## Admin Login Logs
+
+- Admin UI: `/admin/login-events`
+- Admin API: `/api/admin/login-events`
+- Admin users are configured via env:
+  - `ADMIN_USERNAMES` (comma-separated usernames, default `admin`)
+  - `ADMIN_USER_IDS` (comma-separated numeric IDs)

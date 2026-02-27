@@ -3,12 +3,26 @@ services:
     name: expense-tracker-pro
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn run:app -c gunicorn.conf.py
+    startCommand: gunicorn -k eventlet -w 1 run:app -c gunicorn.conf.py
     healthCheckPath: /login
+    disks:
+      - name: app-data
+        mountPath: /var/data
+        sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_PATH
-        value: /opt/render/project/src/expenses.db
+        value: /var/data/expenses.db
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: AUTO_BACKUP_ENABLED
+        value: "1"
+      - key: AUTO_RESTORE_FROM_BACKUP
+        value: "1"
+      - key: BACKUP_MIN_INTERVAL_SECONDS
+        value: "120"
+      - key: BACKUP_KEEP_COUNT
+        value: "30"

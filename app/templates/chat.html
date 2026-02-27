@@ -11,7 +11,7 @@
                     <p class="mb-0 text-secondary small">Signed in as</p>
                     <h6 class="mb-0">@{{ g.user.username }}</h6>
                 </div>
-                <a href="{{ url_for('main.profile') }}" class="btn btn-outline-secondary btn-sm">Profile</a>
+                <a href="{{ url_for('main.settings_page') }}" class="btn btn-outline-secondary btn-sm">Settings</a>
             </header>
 
             <div class="whatsapp-sidebar__search">
@@ -32,7 +32,12 @@
                         class="chat-list-item {% if active_chat_id == chat.id %}chat-list-item--active{% endif %}"
                         data-chat-name="{{ (chat.peer_username or chat.name or 'Chat') | lower }}"
                     >
-                        <div class="chat-list-item__title">{{ chat.peer_username or chat.name or "Chat" }}</div>
+                        <div class="chat-list-item__title-row">
+                            <div class="chat-list-item__title">{{ chat.peer_username or chat.name or "Chat" }}</div>
+                            {% if chat.unread_count and chat.unread_count > 0 %}
+                            <span class="chat-unread-badge">{{ chat.unread_count }}</span>
+                            {% endif %}
+                        </div>
                         <div class="chat-list-item__meta">{{ chat.last_message or "No messages yet" }}</div>
                     </a>
                     {% endfor %}
@@ -74,7 +79,12 @@
                     <article class="message-row {% if message.sender_id == g.user.id %}message-row--me{% endif %}" data-message-id="{{ message.id }}">
                         <div class="message-bubble {% if message.sender_id == g.user.id %}message-bubble--me{% endif %}">
                             <p class="message-text mb-1">{{ message.body }}</p>
-                            <p class="message-meta mb-0">{{ message.sender_username }} · {{ message.created_at }}</p>
+                            <p class="message-meta mb-0">
+                                {{ message.sender_username }} · {{ message.created_at }}
+                                {% if message.sender_id == g.user.id %}
+                                <span class="message-tick">{% if message.is_seen %}✓✓{% else %}✓{% endif %}</span>
+                                {% endif %}
+                            </p>
                         </div>
                     </article>
                     {% endfor %}
@@ -82,6 +92,7 @@
                     <p class="text-secondary mb-0">No messages yet. Say hello.</p>
                 {% endif %}
             </div>
+            <div id="typingIndicator" class="typing-indicator"></div>
 
             <form method="post" action="{{ url_for('main.send_chat_message', chat_id=active_chat.id) }}" class="chat-window__composer whatsapp-composer" id="chatComposer">
                 <input type="text" class="form-control" name="body" placeholder="Type a message..." autocomplete="off" required>
@@ -113,7 +124,63 @@ const composer = document.getElementById("chatComposer");
 const messageInput = composer ? composer.querySelector("input[name='body']") : null;
 const userSearchInput = document.getElementById("userSearchInput");
 const userList = document.getElementById("userList");
-const socket = io();
+const typingIndicator = document.getElementById("typingIndicator");
+const socket = io({ transports: ["websocket", "polling"] });
+let typingState = false;
+let typingStopTimer = null;
+let pushReady = false;
+
+function maybeNotify(message) {
+    if (!message) return;
+    if (pushReady) return;
+    if (Number(message.sender_id) === Number(CURRENT_USER_ID)) return;
+    if (document.visibilityState === "visible" && document.hasFocus()) return;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    new Notification(message.sender_username || "New message", {
+        body: message.body || "",
+        tag: `chat_${message.chat_id}`
+    });
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/\-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i += 1) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+async function registerPushNotifications() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    try {
+        const registration = await navigator.serviceWorker.register("/static/sw.js");
+        const keyResponse = await fetch("/api/push/public-key", { credentials: "same-origin" });
+        const keyPayload = await keyResponse.json();
+        if (!keyPayload || !keyPayload.ok || !keyPayload.public_key) return;
+
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+            const permission = await Notification.requestPermission();
+            if (permission !== "granted") return;
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(keyPayload.public_key),
+            });
+        }
+        await fetch("/api/push/subscribe", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(subscription.toJSON()),
+        });
+        pushReady = true;
+    } catch (_err) {
+        pushReady = false;
+    }
+}
 
 function escapeHtml(value) {
     return String(value)
@@ -136,27 +203,84 @@ function renderMessage(message) {
     row.innerHTML = `
         <div class="message-bubble${mine ? " message-bubble--me" : ""}">
             <p class="message-text mb-1">${escapeHtml(message.body)}</p>
-            <p class="message-meta mb-0">${escapeHtml(message.sender_username)} · ${escapeHtml(message.created_at)}</p>
+            <p class="message-meta mb-0">
+                ${escapeHtml(message.sender_username)} · ${escapeHtml(message.created_at)}
+                ${mine ? `<span class="message-tick">${message.is_seen ? "✓✓" : "✓"}</span>` : ""}
+            </p>
         </div>
     `;
     container.appendChild(row);
     container.scrollTop = container.scrollHeight;
+    if (!mine && ACTIVE_CHAT_ID) {
+        socket.emit("mark_seen", { room: `conversation_${ACTIVE_CHAT_ID}` });
+    }
+}
+
+function setTypingIndicator(text = "") {
+    if (!typingIndicator) return;
+    typingIndicator.textContent = text;
 }
 
 socket.on("connect", () => {
     if (ACTIVE_CHAT_ID) {
         socket.emit("join_chat", { room: `conversation_${ACTIVE_CHAT_ID}` });
+        socket.emit("mark_seen", { room: `conversation_${ACTIVE_CHAT_ID}` });
     }
 });
 
 socket.on("new_message", (message) => {
     renderMessage(message);
+    maybeNotify(message);
 });
 socket.on("receive_message", (message) => {
     renderMessage(message);
+    maybeNotify(message);
+});
+
+socket.on("typing_start", (event) => {
+    if (!event || Number(event.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    if (Number(event.user_id) === Number(CURRENT_USER_ID)) return;
+    setTypingIndicator(`${event.username || "Someone"} is typing...`);
+});
+
+socket.on("typing_stop", (event) => {
+    if (!event || Number(event.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    setTypingIndicator("");
+});
+
+socket.on("messages_seen", (payload) => {
+    if (!payload || Number(payload.chat_id) !== Number(ACTIVE_CHAT_ID)) return;
+    const ids = new Set((payload.message_ids || []).map((id) => String(id)));
+    if (!ids.size) return;
+    ids.forEach((id) => {
+        const row = container ? container.querySelector(`[data-message-id="${id}"]`) : null;
+        if (!row) return;
+        const tick = row.querySelector(".message-tick");
+        if (tick) tick.textContent = "✓✓";
+    });
 });
 
 if (composer && messageInput && ACTIVE_CHAT_ID) {
+    messageInput.addEventListener("input", () => {
+        if (!typingState) {
+            typingState = true;
+            socket.emit("typing_start", { room: `conversation_${ACTIVE_CHAT_ID}` });
+        }
+        if (typingStopTimer) {
+            window.clearTimeout(typingStopTimer);
+        }
+        typingStopTimer = window.setTimeout(() => {
+            typingState = false;
+            socket.emit("typing_stop", { room: `conversation_${ACTIVE_CHAT_ID}` });
+        }, 900);
+    });
+
+    messageInput.addEventListener("blur", () => {
+        if (!typingState) return;
+        typingState = false;
+        socket.emit("typing_stop", { room: `conversation_${ACTIVE_CHAT_ID}` });
+    });
+
     composer.addEventListener("submit", (event) => {
         event.preventDefault();
         const body = messageInput.value.trim();
@@ -167,6 +291,10 @@ if (composer && messageInput && ACTIVE_CHAT_ID) {
             sender: CURRENT_USERNAME
         });
         messageInput.value = "";
+        if (typingState) {
+            typingState = false;
+            socket.emit("typing_stop", { room: `conversation_${ACTIVE_CHAT_ID}` });
+        }
     });
 }
 
@@ -180,5 +308,10 @@ if (userSearchInput && userList) {
         });
     });
 }
+
+if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+}
+registerPushNotifications();
 </script>
 {% endblock %}

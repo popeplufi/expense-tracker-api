@@ -81,6 +81,41 @@ CREATE TABLE IF NOT EXISTS friendships (
     FOREIGN KEY (user1_id) REFERENCES users (id) ON DELETE CASCADE,
     FOREIGN KEY (user2_id) REFERENCES users (id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS statuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    content TEXT,
+    media_path TEXT,
+    media_type TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT,
+    success INTEGER NOT NULL DEFAULT 0,
+    ip_address TEXT,
+    user_agent TEXT,
+    source TEXT NOT NULL DEFAULT 'web',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);
 """
 
 
@@ -274,6 +309,91 @@ def _ensure_friendship_tables(db):
     )
 
 
+def _ensure_status_table(db):
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS statuses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            content TEXT,
+            media_path TEXT,
+            media_type TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+        """
+    )
+    columns = db.execute("PRAGMA table_info(statuses)").fetchall()
+    existing_columns = {column["name"] for column in columns}
+    if "media_path" not in existing_columns:
+        db.execute("ALTER TABLE statuses ADD COLUMN media_path TEXT")
+    if "media_type" not in existing_columns:
+        db.execute("ALTER TABLE statuses ADD COLUMN media_type TEXT")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_statuses_user_id ON statuses (user_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_statuses_expires_at ON statuses (expires_at)")
+
+
+def _ensure_push_subscriptions_table(db):
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            endpoint TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            user_agent TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_user_endpoint
+        ON push_subscriptions (user_id, endpoint)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id
+        ON push_subscriptions (user_id)
+        """
+    )
+
+
+def _ensure_login_events_table(db):
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            success INTEGER NOT NULL DEFAULT 0,
+            ip_address TEXT,
+            user_agent TEXT,
+            source TEXT NOT NULL DEFAULT 'web',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_login_events_user_created
+        ON login_events (user_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_login_events_created
+        ON login_events (created_at DESC)
+        """
+    )
+
+
 def init_db():
     db = get_db()
     db.executescript(SCHEMA_SQL)
@@ -283,6 +403,9 @@ def init_db():
     _ensure_chat_columns(db)
     _ensure_message_columns(db)
     _ensure_friendship_tables(db)
+    _ensure_status_table(db)
+    _ensure_push_subscriptions_table(db)
+    _ensure_login_events_table(db)
     db.commit()
 
 

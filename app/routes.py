@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
+from uuid import uuid4
 
 import jwt
 from flask import (
@@ -16,6 +18,7 @@ from flask import (
 )
 from flask_login import current_user, login_user, logout_user
 from jwt import ExpiredSignatureError, InvalidTokenError
+from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import repository
@@ -30,6 +33,7 @@ from .i18n import (
     normalize_language,
     normalize_timezone,
 )
+from .push import is_push_configured, is_push_dependency_available, send_web_push
 from .session_user import SessionUser
 from .services import claim_legacy_expenses_for_user
 
@@ -37,6 +41,16 @@ bp = Blueprint("main", __name__)
 PAGE_SIZE_DEFAULT = 20
 PAGE_SIZE_MAX = 100
 JWT_ALGORITHM = "HS256"
+ALLOWED_STATUS_EXTENSIONS = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+}
 
 
 def _jwt_expiration_minutes():
@@ -117,6 +131,37 @@ def _parse_int(value, default, minimum=None, maximum=None):
     if maximum is not None and parsed > maximum:
         parsed = maximum
     return parsed
+
+
+def _request_ip():
+    forwarded = request.headers.get("X-Forwarded-For", "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return (request.remote_addr or "").strip() or None
+
+
+def _configured_admin_usernames():
+    raw = str(current_app.config.get("ADMIN_USERNAMES", "admin"))
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _configured_admin_ids():
+    raw = str(current_app.config.get("ADMIN_USER_IDS", ""))
+    ids = set()
+    for item in raw.split(","):
+        value = item.strip()
+        if value.isdigit():
+            ids.add(int(value))
+    return ids
+
+
+def _is_admin_user(user):
+    if not user:
+        return False
+    if int(user.get("id", 0)) in _configured_admin_ids():
+        return True
+    username = str(user.get("username", "")).lower()
+    return username in _configured_admin_usernames()
 
 
 def _dashboard_payload(
@@ -231,6 +276,7 @@ def load_preferences():
 @bp.before_app_request
 def load_logged_in_user():
     g.auth_error = None
+    g.is_admin = False
 
     if request.path.startswith("/api/"):
         token = _parse_bearer_token()
@@ -238,6 +284,7 @@ def load_logged_in_user():
             user, token_error = _user_from_token(token)
             if user is not None:
                 g.user = user
+                g.is_admin = _is_admin_user(g.user)
             else:
                 g.user = None
                 g.auth_error = token_error or "Unauthorized."
@@ -253,6 +300,7 @@ def load_logged_in_user():
                 "username": current_user.username,
                 "created_at": None,
             }
+        g.is_admin = _is_admin_user(g.user)
         return
 
     user_id = session.get("user_id")
@@ -260,6 +308,7 @@ def load_logged_in_user():
         g.user = None
     else:
         g.user = repository.get_user_by_id(user_id)
+    g.is_admin = _is_admin_user(g.user)
 
 
 def login_required(view):
@@ -281,6 +330,24 @@ def login_required(view):
                 )
             flash("Please log in to continue.", "error")
             return redirect(url_for("main.login"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.user is None:
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "message": "Unauthorized"}), 401
+            flash("Please log in to continue.", "error")
+            return redirect(url_for("main.login"))
+        if not _is_admin_user(g.user):
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "message": "Forbidden"}), 403
+            flash("Admin access required.", "error")
+            return redirect(url_for("main.chat_home"))
         return view(*args, **kwargs)
 
     return wrapped_view
@@ -333,15 +400,35 @@ def login():
         return redirect(url_for("main.chat_home"))
 
     if request.method == "POST":
-        user = repository.get_user_by_username(request.form["username"].strip())
+        username = request.form["username"].strip()
+        user = repository.get_user_by_username(username)
+        password = request.form["password"]
+        ip_address = _request_ip()
+        user_agent = request.headers.get("User-Agent", "")
 
-        if user and check_password_hash(user["password_hash"], request.form["password"]):
+        if user and check_password_hash(user["password_hash"], password):
             login_user(SessionUser(user["id"], user["username"]))
             session["user_id"] = user["id"]
             repository.set_user_online(user["id"], True)
+            repository.create_login_event(
+                user_id=user["id"],
+                username=username,
+                success=True,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                source="web",
+            )
             flash("Welcome back.", "success")
             return redirect(url_for("main.chat_home"))
 
+        repository.create_login_event(
+            user_id=(user["id"] if user else None),
+            username=username,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            source="web",
+        )
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
@@ -405,15 +492,33 @@ def api_login():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
+    ip_address = _request_ip()
+    user_agent = request.headers.get("User-Agent", "")
 
     if not username or not password:
         return jsonify({"ok": False, "message": "Username and password are required."}), 400
 
     user = repository.get_user_by_username(username)
     if not user or not check_password_hash(user["password_hash"], password):
+        repository.create_login_event(
+            user_id=(user["id"] if user else None),
+            username=username,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            source="api",
+        )
         return jsonify({"ok": False, "message": "Invalid username or password."}), 401
 
     repository.set_user_online(user["id"], True)
+    repository.create_login_event(
+        user_id=user["id"],
+        username=username,
+        success=True,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        source="api",
+    )
     user = repository.get_user_by_id(user["id"])
     token = _create_jwt(user["id"])
     return jsonify(
@@ -432,6 +537,109 @@ def api_auth_me():
     return jsonify({"ok": True, "user": _api_user_payload(g.user)})
 
 
+@bp.get("/api/push/public-key")
+@login_required
+def push_public_key():
+    public_key = current_app.config.get("VAPID_PUBLIC_KEY", "")
+    return jsonify(
+        {
+            "ok": bool(public_key),
+            "configured": is_push_configured(),
+            "public_key": public_key,
+        }
+    )
+
+
+@bp.post("/api/push/subscribe")
+@login_required
+def push_subscribe():
+    if not is_push_configured():
+        return jsonify({"ok": False, "message": "Push is not configured on server."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    endpoint = str(payload.get("endpoint", "")).strip()
+    keys = payload.get("keys") or {}
+    p256dh = str(keys.get("p256dh", "")).strip()
+    auth = str(keys.get("auth", "")).strip()
+    if not endpoint or not p256dh or not auth:
+        return jsonify({"ok": False, "message": "Invalid push subscription payload."}), 400
+
+    repository.upsert_push_subscription(
+        user_id=g.user["id"],
+        endpoint=endpoint,
+        p256dh=p256dh,
+        auth=auth,
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/push/unsubscribe")
+@login_required
+def push_unsubscribe():
+    payload = request.get_json(silent=True) or {}
+    endpoint = str(payload.get("endpoint", "")).strip()
+    if not endpoint:
+        return jsonify({"ok": False, "message": "endpoint is required."}), 400
+    repository.delete_push_subscription_by_endpoint(g.user["id"], endpoint)
+    return jsonify({"ok": True})
+
+
+@bp.get("/api/push/status")
+@login_required
+def push_status():
+    return jsonify(
+        {
+            "ok": True,
+            "configured": is_push_configured(),
+            "dependency_available": is_push_dependency_available(),
+            "vapid_public_key_set": bool(current_app.config.get("VAPID_PUBLIC_KEY")),
+            "vapid_private_key_set": bool(current_app.config.get("VAPID_PRIVATE_KEY")),
+            "vapid_claims_sub": current_app.config.get("VAPID_CLAIMS_SUB", ""),
+            "subscription_count": repository.count_push_subscriptions_for_user(g.user["id"]),
+        }
+    )
+
+
+@bp.post("/api/push/test")
+@login_required
+def push_test():
+    if not is_push_configured():
+        return jsonify({"ok": False, "message": "Push is not configured on server."}), 503
+
+    subscriptions = repository.list_push_subscriptions_for_users([g.user["id"]])
+    if not subscriptions:
+        return jsonify({"ok": False, "message": "No push subscriptions found for this user."}), 404
+
+    delivered = 0
+    removed = 0
+    for sub in subscriptions:
+        ok, reason = send_web_push(
+            sub,
+            {
+                "title": "Plufi Chat",
+                "body": "Push test successful.",
+                "chat_id": None,
+                "url": "/settings",
+            },
+        )
+        if ok:
+            delivered += 1
+            continue
+        if reason == "gone":
+            repository.delete_push_subscription_by_endpoint(g.user["id"], sub["endpoint"])
+            removed += 1
+
+    return jsonify(
+        {
+            "ok": delivered > 0,
+            "delivered": delivered,
+            "removed_stale": removed,
+            "total": len(subscriptions),
+        }
+    )
+
+
 @bp.get("/profile")
 @login_required
 def profile():
@@ -447,14 +655,19 @@ def chat_home():
     if selected_chat_raw.isdigit():
         selected_chat_id = int(selected_chat_raw)
 
-    chats = repository.list_user_chats(g.user["id"])
-    users = repository.list_friends(g.user["id"])
-
     if selected_chat_id and not repository.user_in_chat(g.user["id"], selected_chat_id):
         selected_chat_id = None
 
+    users = repository.list_friends(g.user["id"])
+    chats = repository.list_user_chats(g.user["id"])
+
     if selected_chat_id is None and chats:
         selected_chat_id = chats[0]["id"]
+        repository.mark_messages_seen(selected_chat_id, g.user["id"])
+        chats = repository.list_user_chats(g.user["id"])
+    elif selected_chat_id is not None:
+        repository.mark_messages_seen(selected_chat_id, g.user["id"])
+        chats = repository.list_user_chats(g.user["id"])
 
     messages = []
     active_chat = None
@@ -508,7 +721,124 @@ def contacts_page():
 @bp.get("/status")
 @login_required
 def status_page():
-    return render_template("status.html")
+    my_statuses = repository.list_active_statuses_for_user(g.user["id"])
+    all_statuses = repository.list_active_statuses()
+    contact_statuses = [item for item in all_statuses if int(item["user_id"]) != int(g.user["id"])]
+    return render_template(
+        "status.html",
+        my_statuses=my_statuses,
+        contact_statuses=contact_statuses,
+    )
+
+
+@bp.post("/status")
+@login_required
+def post_status():
+    content = request.form.get("content", "").strip()
+    status_file = request.files.get("media")
+    media_path = None
+    media_type = None
+
+    if status_file and status_file.filename:
+        original_name = secure_filename(status_file.filename)
+        ext = Path(original_name).suffix.lower()
+        media_type = ALLOWED_STATUS_EXTENSIONS.get(ext)
+        if not media_type:
+            flash("Only image/video files are allowed for status.", "error")
+            return redirect(url_for("main.status_page"))
+        upload_dir = Path(current_app.root_path) / "static" / "uploads" / "status"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved_name = f"{uuid4().hex}{ext}"
+        status_file.save(upload_dir / saved_name)
+        media_path = f"uploads/status/{saved_name}"
+
+    if not content and not media_path:
+        flash("Status text or media is required.", "error")
+        return redirect(url_for("main.status_page"))
+    if len(content) > 280:
+        flash("Status is too long (max 280 characters).", "error")
+        return redirect(url_for("main.status_page"))
+    repository.create_status(
+        g.user["id"],
+        content=content or None,
+        media_path=media_path,
+        media_type=media_type,
+    )
+    flash("Status posted.", "success")
+    return redirect(url_for("main.status_page"))
+
+
+@bp.get("/settings")
+@login_required
+def settings_page():
+    return render_template(
+        "settings.html",
+        push_configured=is_push_configured(),
+        push_dependency_available=is_push_dependency_available(),
+        push_subscription_count=repository.count_push_subscriptions_for_user(g.user["id"]),
+    )
+
+
+@bp.get("/admin/login-events")
+@admin_required
+def admin_login_events_page():
+    page = _parse_int(request.args.get("page"), 1, minimum=1)
+    per_page = _parse_int(request.args.get("per_page"), 50, minimum=10, maximum=200)
+    username = request.args.get("username", "").strip() or None
+    source = request.args.get("source", "").strip() or None
+    success_raw = request.args.get("success", "").strip()
+    success = None
+    if success_raw in {"0", "1"}:
+        success = bool(int(success_raw))
+
+    offset = (page - 1) * per_page
+    total = repository.count_login_events(username=username, source=source, success=success)
+    events = repository.list_login_events(
+        limit=per_page, offset=offset, username=username, source=source, success=success
+    )
+    return render_template(
+        "admin_login_events.html",
+        events=events,
+        total=total,
+        page=page,
+        per_page=per_page,
+        has_prev=page > 1,
+        has_next=(offset + len(events)) < total,
+        filters={
+            "username": username or "",
+            "source": source or "",
+            "success": success_raw,
+        },
+    )
+
+
+@bp.get("/api/admin/login-events")
+@admin_required
+def api_admin_login_events():
+    limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
+    offset = _parse_int(request.args.get("offset"), 0, minimum=0)
+    username = request.args.get("username", "").strip() or None
+    source = request.args.get("source", "").strip() or None
+    success_raw = request.args.get("success", "").strip()
+    success = None
+    if success_raw in {"0", "1"}:
+        success = bool(int(success_raw))
+    items = repository.list_login_events(
+        limit=limit, offset=offset, username=username, source=source, success=success
+    )
+    total = repository.count_login_events(username=username, source=source, success=success)
+    return jsonify(
+        {
+            "ok": True,
+            "items": items,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "returned": len(items),
+                "total": total,
+            },
+        }
+    )
 
 
 @bp.get("/chat/start/<int:user_id>")

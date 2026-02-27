@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login Logs{% endblock %}
+
+{% block content %}
+<section class="section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Login Events</h2>
+        <span class="text-secondary small">Total: {{ total }}</span>
+    </div>
+
+    <form method="get" class="card p-3 mb-3 dark-card">
+        <div class="row g-2">
+            <div class="col-md-4">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-control" name="username" value="{{ filters.username }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Source</label>
+                <select class="form-select" name="source">
+                    <option value="" {% if not filters.source %}selected{% endif %}>Any</option>
+                    <option value="web" {% if filters.source == "web" %}selected{% endif %}>Web</option>
+                    <option value="api" {% if filters.source == "api" %}selected{% endif %}>API</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Result</label>
+                <select class="form-select" name="success">
+                    <option value="" {% if not filters.success %}selected{% endif %}>Any</option>
+                    <option value="1" {% if filters.success == "1" %}selected{% endif %}>Success</option>
+                    <option value="0" {% if filters.success == "0" %}selected{% endif %}>Failure</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-grid">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-primary" type="submit">Filter</button>
+            </div>
+        </div>
+    </form>
+
+    <div class="card p-3 dark-card">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Result</th>
+                        <th>Source</th>
+                        <th>IP</th>
+                        <th>User Agent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if events %}
+                        {% for event in events %}
+                        <tr>
+                            <td>{{ event.created_at }}</td>
+                            <td>{{ event.username or "-" }}{% if event.user_id %} (#{{ event.user_id }}){% endif %}</td>
+                            <td>
+                                {% if event.success %}
+                                <span class="badge text-bg-success">Success</span>
+                                {% else %}
+                                <span class="badge text-bg-danger">Failure</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ event.source }}</td>
+                            <td>{{ event.ip_address or "-" }}</td>
+                            <td class="small text-secondary">{{ event.user_agent or "-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-secondary">No login events found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex justify-content-between mt-3">
+            {% if has_prev %}
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.admin_login_events_page', page=page-1, per_page=per_page, username=filters.username, source=filters.source, success=filters.success) }}">Previous</a>
+            {% else %}
+            <span></span>
+            {% endif %}
+
+            {% if has_next %}
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.admin_login_events_page', page=page+1, per_page=per_page, username=filters.username, source=filters.source, success=filters.success) }}">Next</a>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% endblock %}
