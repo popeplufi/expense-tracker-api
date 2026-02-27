@@ -33,6 +33,10 @@ def send_web_push(subscription, payload):
     if not endpoint or not p256dh or not auth:
         return False, "invalid_subscription"
 
+    private_key = current_app.config.get("VAPID_PRIVATE_KEY")
+    if not private_key:
+        return False, "not_configured"
+
     try:
         webpush(
             subscription_info={
@@ -40,7 +44,7 @@ def send_web_push(subscription, payload):
                 "keys": {"p256dh": p256dh, "auth": auth},
             },
             data=json.dumps(payload),
-            vapid_private_key=current_app.config["VAPID_PRIVATE_KEY"],
+            vapid_private_key=private_key,
             vapid_claims={"sub": current_app.config.get("VAPID_CLAIMS_SUB", "mailto:admin@example.com")},
             ttl=60,
         )
@@ -50,4 +54,7 @@ def send_web_push(subscription, payload):
         if status_code in (404, 410):
             return False, "gone"
         current_app.logger.warning("Web push failed: %s", exc)
+        return False, "failed"
+    except Exception as exc:
+        current_app.logger.warning("Unexpected web push failure: %s", exc)
         return False, "failed"
