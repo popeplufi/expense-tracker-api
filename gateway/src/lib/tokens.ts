@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import bcrypt from "bcryptjs";
 import type { FastifyInstance } from "fastify";
+import jwt from "jsonwebtoken";
 
 import { config } from "../config.js";
 
@@ -22,30 +23,31 @@ export async function verifyRefreshTokenHash(token: string, hash: string): Promi
 }
 
 export async function signAccessToken(
-  fastify: FastifyInstance,
+  _fastify: FastifyInstance,
   payload: { userId: number; username: string; sessionId: string }
 ): Promise<string> {
-  return fastify.jwt.sign({ ...payload, tokenType: "access" }, {
-    expiresIn: config.jwt.accessTtlSeconds,
-    secret: config.jwt.accessSecret
+  return jwt.sign({ ...payload, tokenType: "access" }, config.jwt.accessSecret, {
+    expiresIn: config.jwt.accessTtlSeconds
   });
 }
 
 export async function signRefreshToken(
-  fastify: FastifyInstance,
+  _fastify: FastifyInstance,
   payload: { userId: number; username: string; sessionId: string }
 ): Promise<string> {
-  return fastify.jwt.sign({ ...payload, tokenType: "refresh" }, {
-    expiresIn: config.jwt.refreshTtlSeconds,
-    secret: config.jwt.refreshSecret
+  return jwt.sign({ ...payload, tokenType: "refresh" }, config.jwt.refreshSecret, {
+    expiresIn: config.jwt.refreshTtlSeconds
   });
 }
 
 export async function verifyRefreshJwt(
-  fastify: FastifyInstance,
+  _fastify: FastifyInstance,
   token: string
 ): Promise<{ userId: number; username: string; sessionId: string; tokenType: string }> {
-  return fastify.jwt.verify(token, {
-    secret: config.jwt.refreshSecret
-  }) as { userId: number; username: string; sessionId: string; tokenType: string };
+  return jwt.verify(token, config.jwt.refreshSecret) as {
+    userId: number;
+    username: string;
+    sessionId: string;
+    tokenType: string;
+  };
 }

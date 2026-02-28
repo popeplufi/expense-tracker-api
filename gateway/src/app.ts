@@ -40,7 +40,7 @@ export async function buildApp() {
     const statusCode = (error as any).statusCode || 500;
     reply.status(statusCode).send({
       ok: false,
-      message: error.message || "Internal server error"
+      message: (error as Error).message || "Internal server error"
     });
   });
 

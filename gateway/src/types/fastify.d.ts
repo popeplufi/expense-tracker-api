@@ -1,6 +1,5 @@
-import type Redis from "ioredis";
+import type { Redis } from "ioredis";
 import type { Pool } from "pg";
-import type { Socket } from "socket.io";
 
 declare module "fastify" {
   interface FastifyInstance {

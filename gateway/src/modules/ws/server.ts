@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { createAdapter } from "@socket.io/redis-adapter";
+import jwt from "jsonwebtoken";
+import { Redis } from "ioredis";
 import type { Socket } from "socket.io";
 import { Server } from "socket.io";
 
@@ -172,8 +174,8 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
     },
   });
 
-  const pub = fastify.redis.duplicate();
-  const sub = fastify.redis.duplicate();
+  const pub = new Redis(config.redisUrl);
+  const sub = new Redis(config.redisUrl);
   await Promise.all([pub.ping(), sub.ping()]);
   io.adapter(createAdapter(pub, sub));
 
@@ -201,9 +203,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
       const accessToken = normalizeToken(authToken || headerToken);
       if (!accessToken) return next(new Error("Missing access token"));
 
-      const payload = fastify.jwt.verify(accessToken, {
-        secret: config.jwt.accessSecret,
-      }) as {
+      const payload = jwt.verify(accessToken, config.jwt.accessSecret) as {
         userId: number;
         username: string;
         sessionId: string;
@@ -219,6 +219,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
         username: payload.username,
         sessionId: payload.sessionId,
       };
+      socket.data.userId = payload.userId;
       return next();
     } catch {
       return next(new Error("Unauthorized"));
@@ -330,7 +331,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
         }
 
         const replayKey = `replay:${user.userId}:${payload.nonce}`;
-        const replayGuard = await fastify.redis.set(replayKey, "1", "NX", "PX", config.ws.replayWindowMs);
+        const replayGuard = await fastify.redis.set(replayKey, "1", "PX", config.ws.replayWindowMs, "NX");
         if (!replayGuard) {
           emitSocketError(socket, "replay_nonce", "Nonce already used");
           return;
@@ -367,7 +368,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
 
         const socketsInRoom = await io.in(`chat:${chatId}`).fetchSockets();
         const onlineRecipientIds = socketsInRoom
-          .map((s) => s.authUser?.userId)
+          .map((s) => Number((s.data as { userId?: number }).userId))
           .filter((id): id is number => Number.isFinite(id))
           .filter((id) => id !== user.userId);
 
