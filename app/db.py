@@ -189,14 +189,21 @@ def _ensure_conversation_table(db):
         db.execute("ALTER TABLE conversations ADD COLUMN user1_id INTEGER")
     if "user2_id" not in existing_columns:
         db.execute("ALTER TABLE conversations ADD COLUMN user2_id INTEGER")
+    if "created_at" not in existing_columns:
+        db.execute("ALTER TABLE conversations ADD COLUMN created_at TEXT")
+    db.execute("UPDATE conversations SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
     db.execute("CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations (created_at)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user1_id ON conversations (user1_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user2_id ON conversations (user2_id)")
+    chat_columns = {
+        column["name"] for column in db.execute("PRAGMA table_info(chats)").fetchall()
+    }
+    chat_created_expr = "created_at" if "created_at" in chat_columns else "CURRENT_TIMESTAMP"
     # Backfill from existing chats so current chat IDs are represented as conversations.
     db.execute(
-        """
+        f"""
         INSERT OR IGNORE INTO conversations (id, created_at)
-        SELECT id, created_at
+        SELECT id, {chat_created_expr}
         FROM chats
         """
     )
@@ -226,6 +233,14 @@ def _ensure_message_columns(db):
 
     if "conversation_id" not in existing_columns:
         db.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER")
+    if "chat_id" not in existing_columns:
+        db.execute("ALTER TABLE messages ADD COLUMN chat_id INTEGER")
+    if "sender_id" not in existing_columns:
+        db.execute("ALTER TABLE messages ADD COLUMN sender_id INTEGER")
+    if "body" not in existing_columns:
+        db.execute("ALTER TABLE messages ADD COLUMN body TEXT")
+    if "created_at" not in existing_columns:
+        db.execute("ALTER TABLE messages ADD COLUMN created_at TEXT")
     if "content" not in existing_columns:
         db.execute("ALTER TABLE messages ADD COLUMN content TEXT")
     if "timestamp" not in existing_columns:
@@ -244,6 +259,13 @@ def _ensure_message_columns(db):
     db.execute(
         """
         UPDATE messages
+        SET body = content
+        WHERE (body IS NULL OR body = '')
+        """
+    )
+    db.execute(
+        """
+        UPDATE messages
         SET content = body
         WHERE (content IS NULL OR content = '')
         """
@@ -255,6 +277,7 @@ def _ensure_message_columns(db):
         WHERE (timestamp IS NULL OR timestamp = '')
         """
     )
+    db.execute("UPDATE messages SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
     db.execute("UPDATE messages SET is_seen = 0 WHERE is_seen IS NULL")
 
     db.execute(
@@ -400,8 +423,8 @@ def init_db():
     _ensure_user_columns(db)
     _ensure_expense_user_column(db)
     _ensure_conversation_table(db)
-    _ensure_chat_columns(db)
     _ensure_message_columns(db)
+    _ensure_chat_columns(db)
     _ensure_friendship_tables(db)
     _ensure_status_table(db)
     _ensure_push_subscriptions_table(db)
