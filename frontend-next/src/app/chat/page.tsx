@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 
@@ -23,8 +24,22 @@ type UiMessage = {
   sentAt: string;
   pending?: boolean;
   failed?: boolean;
+  queued?: boolean;
   receipt?: "sent" | "delivered" | "seen";
 };
+
+type PendingOutbound = {
+  chatId: number;
+  payload: {
+    clientMessageId: string;
+    nonce: string;
+    ciphertext: string;
+    sentAt: string;
+    metadata?: Record<string, unknown>;
+  };
+};
+
+const OUTBOX_KEY = "gateway_outbox_v1";
 
 function nonce(): string {
   return `${crypto.randomUUID()}-${Date.now()}`;
@@ -43,34 +58,56 @@ function decryptForDemo(ciphertext: string): string {
 }
 
 function mapEnvelopeToUi(envelope: ChatEnvelope): UiMessage {
-  const preview = decryptForDemo(envelope.ciphertext);
   return {
     id: String(envelope.id),
     chatId: Number(envelope.chat_id),
     senderId: Number(envelope.sender_user_id),
-    text: preview,
+    text: decryptForDemo(envelope.ciphertext),
     sentAt: envelope.created_at,
   };
+}
+
+function loadOutbox(): PendingOutbound[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(OUTBOX_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PendingOutbound[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOutbox(items: PendingOutbound[]): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
 }
 
 export default function ChatPage() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin12345");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+
+  const [loadingAuth, setLoadingAuth] = useState(false);
+  const [loadingChats, setLoadingChats] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [composer, setComposer] = useState("");
+
+  const [socketState, setSocketState] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [networkOnline, setNetworkOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
   const [typingText, setTypingText] = useState("");
-  const [presence, setPresence] = useState<Record<number, string>>({});
+  const [error, setError] = useState("");
+
+  const [outbox, setOutbox] = useState<PendingOutbound[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
   const typingTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
-
   const currentUserId = session?.user.id ?? 0;
 
   const sortedChats = useMemo(
@@ -78,16 +115,45 @@ export default function ChatPage() {
     [chats],
   );
 
+  useEffect(() => {
+    setOutbox(loadOutbox());
+  }, []);
+
+  useEffect(() => {
+    saveOutbox(outbox);
+  }, [outbox]);
+
+  useEffect(() => {
+    const online = () => setNetworkOnline(true);
+    const offline = () => setNetworkOnline(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
+
   async function loadWorkspace(current: SessionState) {
-    const chatItems = await listChats(current);
-    setChats(chatItems);
-    const first = chatItems[0]?.chat_id ?? null;
-    setActiveChatId(first);
-    if (first) {
-      const items = await listMessages(current, first, 80);
-      setMessages(items.reverse().map(mapEnvelopeToUi));
-    } else {
-      setMessages([]);
+    setLoadingChats(true);
+    try {
+      const chatItems = await listChats(current);
+      setChats(chatItems);
+      const first = chatItems[0]?.chat_id ?? null;
+      setActiveChatId(first);
+      if (first) {
+        setLoadingMessages(true);
+        try {
+          const items = await listMessages(current, first, 80);
+          setMessages(items.reverse().map(mapEnvelopeToUi));
+        } finally {
+          setLoadingMessages(false);
+        }
+      } else {
+        setMessages([]);
+      }
+    } finally {
+      setLoadingChats(false);
     }
   }
 
@@ -125,24 +191,52 @@ export default function ChatPage() {
     };
   }, []);
 
+  async function flushOutbox(current: SessionState, socket: Socket | null) {
+    if (!outbox.length || !networkOnline) return;
+    const remaining: PendingOutbound[] = [];
+
+    for (const item of outbox) {
+      try {
+        await postMessage(current, item.chatId, item.payload);
+        socket?.emit("chat:send", { chatId: item.chatId, ...item.payload });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === item.payload.clientMessageId
+              ? { ...m, pending: false, queued: false, failed: false }
+              : m,
+          ),
+        );
+      } catch {
+        remaining.push(item);
+      }
+    }
+
+    setOutbox(remaining);
+  }
+
   useEffect(() => {
     if (!session) return;
-    socketRef.current?.disconnect();
 
+    setSocketState("connecting");
+    socketRef.current?.disconnect();
     const socket = connectGatewaySocket(session.accessToken);
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      setSocketState("connected");
       if (activeChatId) socket.emit("chat:join", { chatId: activeChatId });
       if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = window.setInterval(() => {
         socket.emit("presence:heartbeat");
       }, 8000);
+      flushOutbox(session, socket).catch(() => undefined);
     });
 
-    socket.on("chat:join:ack", () => {
-      setError("");
+    socket.on("disconnect", () => {
+      setSocketState("disconnected");
     });
+
+    socket.on("chat:join:ack", () => setError(""));
 
     socket.on("chat:message", (event: {
       chatId: number;
@@ -150,7 +244,6 @@ export default function ChatPage() {
       messageId: number;
       ciphertext: string;
       createdAt: string;
-      clientMessageId?: string;
     }) => {
       const text = decryptForDemo(event.ciphertext);
       setMessages((prev) => {
@@ -163,56 +256,33 @@ export default function ChatPage() {
             senderId: Number(event.senderId),
             text,
             sentAt: event.createdAt,
-            receipt: event.senderId === currentUserId ? "sent" : undefined,
+            receipt: Number(event.senderId) === Number(currentUserId) ? "sent" : undefined,
           },
         ];
       });
     });
 
-    socket.on("chat:ack", (event: {
-      ok: boolean;
-      clientMessageId: string;
-      messageId: number;
-      duplicate?: boolean;
-    }) => {
+    socket.on("chat:ack", (event: { ok: boolean; clientMessageId: string; messageId: number }) => {
       if (!event.ok) return;
       setMessages((prev) =>
-        prev.map((item) => {
-          if (item.id !== event.clientMessageId) return item;
-          return {
-            ...item,
-            id: String(event.messageId),
-            pending: false,
-            failed: false,
-            receipt: "sent",
-          };
-        }),
+        prev.map((item) =>
+          item.id === event.clientMessageId
+            ? { ...item, id: String(event.messageId), pending: false, queued: false, failed: false, receipt: "sent" }
+            : item,
+        ),
       );
     });
 
     socket.on("chat:receipt", (event: { messageId?: number; messageIds?: number[]; type: "delivered" | "seen" }) => {
       const ids = [event.messageId, ...(event.messageIds || [])].filter((v): v is number => Number.isFinite(v));
       if (!ids.length) return;
-      setMessages((prev) =>
-        prev.map((item) => {
-          if (!ids.includes(Number(item.id))) return item;
-          return { ...item, receipt: event.type };
-        }),
-      );
+      setMessages((prev) => prev.map((item) => (ids.includes(Number(item.id)) ? { ...item, receipt: event.type } : item)));
     });
 
     socket.on("chat:typing", (event: { chatId: number; userId: number; state: "start" | "stop" }) => {
       if (Number(event.chatId) !== Number(activeChatId)) return;
       if (Number(event.userId) === Number(currentUserId)) return;
-      if (event.state === "start") {
-        setTypingText(`User #${event.userId} is typing...`);
-        return;
-      }
-      setTypingText("");
-    });
-
-    socket.on("presence:changed", (event: { userId: number; state: string }) => {
-      setPresence((prev) => ({ ...prev, [event.userId]: event.state }));
+      setTypingText(event.state === "start" ? `User #${event.userId} is typing...` : "");
     });
 
     socket.on("socket:error", (event: { message?: string }) => {
@@ -223,11 +293,16 @@ export default function ChatPage() {
       if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
       socket.disconnect();
     };
-  }, [session, activeChatId, currentUserId]);
+  }, [session, activeChatId, currentUserId, networkOnline]);
+
+  useEffect(() => {
+    if (!session || socketState !== "connected") return;
+    flushOutbox(session, socketRef.current).catch(() => undefined);
+  }, [networkOnline, socketState]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
+    setLoadingAuth(true);
     setError("");
     try {
       const auth = await login(username.trim(), password);
@@ -242,7 +317,7 @@ export default function ChatPage() {
     } catch (err) {
       setError((err as Error).message || "Login failed");
     } finally {
-      setLoading(false);
+      setLoadingAuth(false);
     }
   }
 
@@ -250,9 +325,14 @@ export default function ChatPage() {
     if (!session) return;
     setActiveChatId(chatId);
     setTypingText("");
-    const items = await listMessages(session, chatId, 80);
-    setMessages(items.reverse().map(mapEnvelopeToUi));
-    socketRef.current?.emit("chat:join", { chatId });
+    setLoadingMessages(true);
+    try {
+      const items = await listMessages(session, chatId, 80);
+      setMessages(items.reverse().map(mapEnvelopeToUi));
+      socketRef.current?.emit("chat:join", { chatId });
+    } finally {
+      setLoadingMessages(false);
+    }
   }
 
   async function sendMessage(e: React.FormEvent) {
@@ -261,49 +341,47 @@ export default function ChatPage() {
     const text = composer.trim();
     if (!text) return;
 
-    const clientMessageId = nonce();
-    const sentAt = new Date().toISOString();
     const payload = {
-      clientMessageId,
+      clientMessageId: nonce(),
       nonce: nonce(),
       ciphertext: encryptForDemo(text),
-      sentAt,
-      metadata: {
-        mode: "demo",
-      },
+      sentAt: new Date().toISOString(),
+      metadata: { mode: "demo" },
     };
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: clientMessageId,
-        chatId: activeChatId,
-        senderId: currentUserId,
-        text,
-        sentAt,
-        pending: true,
-        receipt: "sent",
-      },
-    ]);
+    const optimistic: UiMessage = {
+      id: payload.clientMessageId,
+      chatId: activeChatId,
+      senderId: currentUserId,
+      text,
+      sentAt: payload.sentAt,
+      pending: true,
+      queued: !networkOnline || socketState !== "connected",
+      receipt: "sent",
+    };
 
+    setMessages((prev) => [...prev, optimistic]);
     setComposer("");
 
-    socketRef.current?.emit("chat:send", {
-      chatId: activeChatId,
-      ...payload,
-    });
+    if (!networkOnline || socketState !== "connected") {
+      setOutbox((prev) => [...prev, { chatId: activeChatId, payload }]);
+      return;
+    }
+
+    socketRef.current?.emit("chat:send", { chatId: activeChatId, ...payload });
 
     try {
       await postMessage(session, activeChatId, payload);
     } catch {
+      setOutbox((prev) => [...prev, { chatId: activeChatId, payload }]);
       setMessages((prev) =>
-        prev.map((m) => (m.id === clientMessageId ? { ...m, pending: false, failed: true } : m)),
+        prev.map((m) => (m.id === payload.clientMessageId ? { ...m, queued: true } : m)),
       );
     }
   }
 
   function emitTyping() {
-    if (!activeChatId) return;
+    if (!activeChatId || socketState !== "connected") return;
     socketRef.current?.emit("chat:typing:start", { chatId: activeChatId });
     if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
     typingTimerRef.current = window.setTimeout(() => {
@@ -319,8 +397,11 @@ export default function ChatPage() {
     setChats([]);
     setMessages([]);
     setActiveChatId(null);
+    setOutbox([]);
     setError("");
   }
+
+  const activeMessages = messages.filter((m) => !activeChatId || m.chatId === activeChatId);
 
   if (!session) {
     return (
@@ -337,58 +418,93 @@ export default function ChatPage() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </label>
           {error ? <p className="auth-error">{error}</p> : null}
-          <button type="submit" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+          <button type="submit" disabled={loadingAuth}>{loadingAuth ? "Signing in..." : "Sign in"}</button>
         </form>
       </main>
     );
   }
 
   return (
-    <main className="chat-shell">
+    <main className="chat-shell chat-shell--pro">
       <aside className="chat-sidebar">
-        <header>
-          <p className="eyebrow">Signed in</p>
-          <h2>@{session.user.username}</h2>
-          <button className="btn btn--ghost" onClick={onLogout}>Logout</button>
+        <header className="chat-sidebar__header">
+          <div>
+            <p className="eyebrow">Signed in</p>
+            <h2>@{session.user.username}</h2>
+          </div>
+          <div className="chat-sidebar__actions">
+            <Link className="btn btn--ghost btn--tiny" href="/chat/settings">Security</Link>
+            <button className="btn btn--ghost btn--tiny" onClick={onLogout}>Logout</button>
+          </div>
         </header>
-        <div className="chat-list">
-          {sortedChats.map((chat) => (
-            <button
-              key={chat.chat_id}
-              className={`chat-list-item ${activeChatId === chat.chat_id ? "active" : ""}`}
-              onClick={() => chooseChat(chat.chat_id)}
-            >
-              <p>Chat #{chat.chat_id}</p>
-              <small>
-                {chat.message_count} envelopes
-                {presence[chat.chat_id] ? ` · ${presence[chat.chat_id]}` : ""}
-              </small>
-            </button>
-          ))}
+
+        <div className="status-strip">
+          <span className={`status-pill ${networkOnline ? "ok" : "warn"}`}>{networkOnline ? "Online" : "Offline"}</span>
+          <span className={`status-pill ${socketState === "connected" ? "ok" : "warn"}`}>{socketState}</span>
+          <span className="status-pill neutral">Queue: {outbox.length}</span>
         </div>
+
+        {loadingChats ? (
+          <div className="skeleton-stack">
+            <div className="skeleton-line" />
+            <div className="skeleton-line" />
+            <div className="skeleton-line" />
+          </div>
+        ) : sortedChats.length === 0 ? (
+          <p className="empty-copy">No chats yet. Create members in backend and join a chat.</p>
+        ) : (
+          <div className="chat-list">
+            {sortedChats.map((chat) => (
+              <button
+                key={chat.chat_id}
+                className={`chat-list-item ${activeChatId === chat.chat_id ? "active" : ""}`}
+                onClick={() => chooseChat(chat.chat_id)}
+              >
+                <p>Chat #{chat.chat_id}</p>
+                <small>{chat.message_count} encrypted envelopes</small>
+              </button>
+            ))}
+          </div>
+        )}
       </aside>
 
       <section className="chat-main">
         <header className="chat-main__header">
           <h3>{activeChatId ? `Conversation ${activeChatId}` : "No chat selected"}</h3>
-          <p>{typingText || "End-to-end envelope mode (demo decrypt for local UX)."}</p>
+          <p>{typingText || "Zero-trust mode: encrypted envelopes, local decryption preview."}</p>
         </header>
 
         <div className="chat-stream">
-          {messages
-            .filter((m) => !activeChatId || m.chatId === activeChatId)
-            .map((message) => {
+          {loadingMessages ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-bubble" />
+              <div className="skeleton-bubble" />
+              <div className="skeleton-bubble" />
+            </div>
+          ) : activeMessages.length === 0 ? (
+            <p className="empty-copy">No messages in this chat yet.</p>
+          ) : (
+            activeMessages.map((message) => {
               const mine = Number(message.senderId) === Number(currentUserId);
+              const meta = message.failed
+                ? "failed"
+                : message.queued
+                  ? "queued"
+                  : message.pending
+                    ? "sending"
+                    : message.receipt || "sent";
+
               return (
                 <article key={`${message.id}-${message.sentAt}`} className={`bubble ${mine ? "mine" : "other"}`}>
                   <p>{message.text}</p>
                   <small>
-                    {new Date(message.sentAt).toLocaleTimeString()} 
-                    {mine ? ` · ${message.failed ? "failed" : message.pending ? "sending" : message.receipt || "sent"}` : ""}
+                    {new Date(message.sentAt).toLocaleTimeString()}
+                    {mine ? ` · ${meta}` : ""}
                   </small>
                 </article>
               );
-            })}
+            })
+          )}
         </div>
 
         <form className="chat-composer" onSubmit={sendMessage}>
@@ -398,9 +514,10 @@ export default function ChatPage() {
               setComposer(e.target.value);
               emitTyping();
             }}
-            placeholder="Type encrypted message..."
+            placeholder={activeChatId ? "Type encrypted message..." : "Select chat first"}
+            disabled={!activeChatId}
           />
-          <button type="submit" disabled={!activeChatId}>Send</button>
+          <button type="submit" disabled={!activeChatId || !composer.trim()}>Send</button>
         </form>
 
         {error ? <p className="chat-error">{error}</p> : null}
