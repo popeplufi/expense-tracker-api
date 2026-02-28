@@ -1,0 +1,64 @@
+name: Render Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy"
+        required: true
+        type: choice
+        options:
+          - web
+          - gateway
+          - frontend-next
+          - all
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger selected Render deploy hooks
+        env:
+          TARGET: ${{ inputs.service }}
+          WEB_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_WEB }}
+          GATEWAY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_GATEWAY }}
+          FRONTEND_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND_NEXT }}
+        run: |
+          set -euo pipefail
+
+          trigger() {
+            local name="$1"
+            local hook="$2"
+            if [ -z "$hook" ]; then
+              echo "Missing deploy hook secret for $name."
+              exit 1
+            fi
+            echo "Triggering $name deploy hook"
+            curl --fail --silent --show-error -X POST "$hook" >/dev/null
+          }
+
+          case "$TARGET" in
+            web)
+              trigger "web" "$WEB_HOOK"
+              ;;
+            gateway)
+              trigger "gateway" "$GATEWAY_HOOK"
+              ;;
+            frontend-next)
+              trigger "frontend-next" "$FRONTEND_HOOK"
+              ;;
+            all)
+              trigger "web" "$WEB_HOOK"
+              trigger "gateway" "$GATEWAY_HOOK"
+              trigger "frontend-next" "$FRONTEND_HOOK"
+              ;;
+            *)
+              echo "Unsupported target: $TARGET"
+              exit 1
+              ;;
+          esac
+
+      - name: Deployment summary
+        run: |
+          echo "Render deploy trigger sent for target: ${{ inputs.service }}"
+          echo "Use Render logs and /healthz,/readyz checks to confirm healthy release."

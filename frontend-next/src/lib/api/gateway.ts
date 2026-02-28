@@ -1,6 +1,6 @@
 import type { SessionState } from "@/lib/auth/session";
 
-const API_BASE = process.env.NEXT_PUBLIC_GATEWAY_HTTP_BASE || "http://127.0.0.1:4000";
+const API_BASE = process.env.NEXT_PUBLIC_GATEWAY_HTTP_BASE ?? "http://127.0.0.1:4000";
 
 export interface GatewayAuthResponse {
   ok: boolean;
