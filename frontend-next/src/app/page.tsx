@@ -1,7 +1,16 @@
+"use client";
+
+import { motion } from "framer-motion";
+
 export default function Home() {
   return (
-    <main className="site">
-      <section className="hero">
+    <main id="main-content" className="site">
+      <motion.section
+        className="hero"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+      >
         <div className="hero__badge">Zero-Trust Real-Time Messaging Infrastructure</div>
         <h1>
           Built like a <span>systems product</span>, not a demo chat app.
@@ -18,9 +27,16 @@ export default function Home() {
             Open Workspace
           </a>
         </div>
-      </section>
+      </motion.section>
 
-      <section id="architecture" className="panel panel--mesh">
+      <motion.section
+        id="architecture"
+        className="panel panel--mesh"
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+      >
         <header className="panel__header">
           <p className="eyebrow">Architecture</p>
           <h2>Six independent layers. One coherent trust model.</h2>
@@ -41,9 +57,15 @@ export default function Home() {
             </article>
           ))}
         </div>
-      </section>
+      </motion.section>
 
-      <section className="panel">
+      <motion.section
+        className="panel"
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+      >
         <header className="panel__header">
           <p className="eyebrow">Message Lifecycle</p>
           <h2>Plaintext never leaves the device boundary.</h2>
@@ -62,9 +84,15 @@ export default function Home() {
             </div>
           ))}
         </div>
-      </section>
+      </motion.section>
 
-      <section className="kpi-strip">
+      <motion.section
+        className="kpi-strip"
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+      >
         <article>
           <p className="kpi">E2E by Design</p>
           <p className="kpi-meta">Server stores ciphertext only</p>
@@ -81,7 +109,7 @@ export default function Home() {
           <p className="kpi">Audit-Ready</p>
           <p className="kpi-meta">Request and security event trails</p>
         </article>
-      </section>
+      </motion.section>
     </main>
   );
 }

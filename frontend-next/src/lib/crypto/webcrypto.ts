@@ -18,6 +18,10 @@ function fromBase64(value: string): Uint8Array {
   return bytes;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 export interface EncryptedPayload {
   iv: string;
   ciphertext: string;
@@ -53,9 +57,9 @@ export async function encryptJson<T>(key: CryptoKey, value: T): Promise<Encrypte
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const plaintext = ENC.encode(JSON.stringify(value));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     key,
-    plaintext,
+    toArrayBuffer(plaintext),
   );
   return {
     iv: toBase64(iv),
@@ -67,9 +71,9 @@ export async function decryptJson<T>(key: CryptoKey, value: EncryptedPayload): P
   const iv = fromBase64(value.iv);
   const ciphertext = fromBase64(value.ciphertext);
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     key,
-    ciphertext,
+    toArrayBuffer(ciphertext),
   );
   return JSON.parse(DEC.decode(new Uint8Array(plaintext))) as T;
 }

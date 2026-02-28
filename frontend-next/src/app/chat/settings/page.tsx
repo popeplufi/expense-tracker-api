@@ -1,26 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { clearSession, loadSession, type SessionState } from "@/lib/auth/session";
 
 const OUTBOX_KEY = "gateway_outbox_v1";
 
 export default function ChatSettingsPage() {
-  const [session, setSession] = useState<SessionState | null>(null);
-  const [outboxCount, setOutboxCount] = useState(0);
-
-  useEffect(() => {
-    setSession(loadSession());
+  const [session, setSession] = useState<SessionState | null>(() => loadSession());
+  const [outboxCount, setOutboxCount] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
     try {
       const raw = window.localStorage.getItem(OUTBOX_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      setOutboxCount(Array.isArray(parsed) ? parsed.length : 0);
+      return Array.isArray(parsed) ? parsed.length : 0;
     } catch {
-      setOutboxCount(0);
+      return 0;
     }
-  }, []);
+  });
 
   const cryptoReady = useMemo(
     () => typeof window !== "undefined" && !!window.crypto?.subtle,

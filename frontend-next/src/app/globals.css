@@ -723,3 +723,119 @@ body {
   display: grid;
   gap: 6px;
 }
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: 10px;
+  z-index: 120;
+  background: #ffffff;
+  color: #1c1a15;
+  border: 1px solid #b8ad9a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+.theme-toggle {
+  position: fixed;
+  right: 14px;
+  top: 12px;
+  z-index: 80;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, #ffffff 8%);
+  border-radius: 999px;
+  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(10, 20, 17, 0.14);
+}
+
+.theme-toggle span {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.theme-toggle strong {
+  font-size: 0.84rem;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+html[data-theme="dusk"] {
+  --bg: #f0e9df;
+  --ink: #241d17;
+  --ink-soft: #5c4f45;
+  --panel: #fff9f0;
+  --line: #cfbfad;
+  --brand: #8b4f2f;
+  --brand-strong: #6f3d22;
+  --brand-soft: #f4ddc9;
+}
+
+html[data-theme="night"] {
+  --bg: #101a1d;
+  --ink: #eaf5f8;
+  --ink-soft: #b4c9cf;
+  --panel: #132328;
+  --line: #2a434a;
+  --brand: #4dd4bd;
+  --brand-strong: #2da58f;
+  --brand-soft: #173b36;
+}
+
+html[data-theme="night"] body {
+  background:
+    radial-gradient(1000px 500px at -10% -20%, #163739 0%, transparent 70%),
+    radial-gradient(1200px 600px at 110% 10%, #3b2b1c 0%, transparent 70%),
+    var(--bg);
+}
+
+html[data-theme="night"] .btn--ghost,
+html[data-theme="night"] .chat-list-item,
+html[data-theme="night"] .pipeline__item,
+html[data-theme="night"] .kpi-strip article,
+html[data-theme="night"] .settings-grid article,
+html[data-theme="night"] .bubble {
+  background: #1a2b30;
+  border-color: #325159;
+}
+
+html[data-theme="night"] .chat-list-item.active,
+html[data-theme="night"] .bubble.mine {
+  background: #1b3a36;
+  border-color: #2e6f64;
+}
+
+html[data-theme="night"] .status-pill.neutral,
+html[data-theme="night"] .day-group__title {
+  background: #18292f;
+  border-color: #2e4d55;
+  color: #c6dde3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

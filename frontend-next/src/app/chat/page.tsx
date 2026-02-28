@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import type { Socket } from "socket.io-client";
 
 import {
@@ -444,7 +445,7 @@ export default function ChatPage() {
 
   if (!session) {
     return (
-      <main className="auth-shell">
+      <main id="main-content" className="auth-shell">
         <form className="auth-card" onSubmit={onLogin}>
           <p className="eyebrow">Gateway Login</p>
           <h1>Sign in to Secure Chat</h1>
@@ -480,8 +481,13 @@ export default function ChatPage() {
         </section>
       ) : null}
 
-      <main className="chat-shell chat-shell--pro">
-        <aside className="chat-sidebar">
+      <main id="main-content" className="chat-shell chat-shell--pro">
+        <motion.aside
+          className="chat-sidebar"
+          initial={{ opacity: 0, x: -12 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+        >
           <header className="chat-sidebar__header">
             <div>
               <p className="eyebrow">Signed in</p>
@@ -529,9 +535,14 @@ export default function ChatPage() {
               })}
             </div>
           )}
-        </aside>
+        </motion.aside>
 
-        <section className="chat-main">
+        <motion.section
+          className="chat-main"
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.28, ease: "easeOut", delay: 0.04 }}
+        >
           <header className="chat-main__header">
             <h3>{activeChatId ? `Conversation ${activeChatId}` : "No chat selected"}</h3>
             <p>{typingText || "Zero-trust mode: encrypted envelopes, local decryption preview."}</p>
@@ -543,7 +554,7 @@ export default function ChatPage() {
             />
           </header>
 
-          <div className="chat-stream">
+          <motion.div className="chat-stream" layout>
             {loadingMessages ? (
               <div className="skeleton-stack">
                 <div className="skeleton-bubble" />
@@ -554,7 +565,7 @@ export default function ChatPage() {
               <p className="empty-copy">No messages match this view.</p>
             ) : (
               groupedMessages.map((group) => (
-                <section key={group.day} className="day-group">
+                <motion.section key={group.day} className="day-group" layout>
                   <p className="day-group__title">{group.day}</p>
                   {group.items.map((message) => {
                     const mine = Number(message.senderId) === Number(currentUserId);
@@ -567,20 +578,27 @@ export default function ChatPage() {
                           : message.receipt || "sent";
 
                     return (
-                      <article key={`${message.id}-${message.sentAt}`} className={`bubble ${mine ? "mine" : "other"}`}>
+                      <motion.article
+                        key={`${message.id}-${message.sentAt}`}
+                        className={`bubble ${mine ? "mine" : "other"}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        layout
+                      >
                         {!mine ? <p className="bubble__sender">{message.senderName}</p> : null}
                         <p>{message.text}</p>
                         <small>
                           {new Date(message.sentAt).toLocaleTimeString()}
                           {mine ? ` · ${meta}` : ""}
                         </small>
-                      </article>
+                      </motion.article>
                     );
                   })}
-                </section>
+                </motion.section>
               ))
             )}
-          </div>
+          </motion.div>
 
           <form className="chat-composer" onSubmit={sendMessage}>
             <input
@@ -596,7 +614,7 @@ export default function ChatPage() {
           </form>
 
           {error ? <p className="chat-error">{error}</p> : null}
-        </section>
+        </motion.section>
       </main>
     </>
   );
