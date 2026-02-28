@@ -20,6 +20,7 @@ type UiMessage = {
   id: string;
   chatId: number;
   senderId: number;
+  senderName: string;
   text: string;
   sentAt: string;
   pending?: boolean;
@@ -40,6 +41,7 @@ type PendingOutbound = {
 };
 
 const OUTBOX_KEY = "gateway_outbox_v1";
+const ONBOARDING_KEY = "chat_onboarding_done_v1";
 
 function nonce(): string {
   return `${crypto.randomUUID()}-${Date.now()}`;
@@ -57,11 +59,12 @@ function decryptForDemo(ciphertext: string): string {
   }
 }
 
-function mapEnvelopeToUi(envelope: ChatEnvelope): UiMessage {
+function mapEnvelopeToUi(envelope: ChatEnvelope, me: string): UiMessage {
   return {
     id: String(envelope.id),
     chatId: Number(envelope.chat_id),
     senderId: Number(envelope.sender_user_id),
+    senderName: envelope.sender_username || (Number(envelope.sender_user_id) > 0 ? `user_${envelope.sender_user_id}` : me),
     text: decryptForDemo(envelope.ciphertext),
     sentAt: envelope.created_at,
   };
@@ -84,6 +87,16 @@ function saveOutbox(items: PendingOutbound[]): void {
   window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
 }
 
+function humanDay(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "Unknown day";
+  const today = new Date();
+  const diff = Math.floor((today.setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString();
+}
+
 export default function ChatPage() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [username, setUsername] = useState("admin");
@@ -97,6 +110,7 @@ export default function ChatPage() {
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [composer, setComposer] = useState("");
+  const [search, setSearch] = useState("");
 
   const [socketState, setSocketState] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [networkOnline, setNetworkOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
@@ -104,6 +118,7 @@ export default function ChatPage() {
   const [error, setError] = useState("");
 
   const [outbox, setOutbox] = useState<PendingOutbound[]>([]);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const typingTimerRef = useRef<number | null>(null);
@@ -115,8 +130,32 @@ export default function ChatPage() {
     [chats],
   );
 
+  const filteredMessages = useMemo(() => {
+    const active = messages.filter((m) => !activeChatId || m.chatId === activeChatId);
+    if (!search.trim()) return active;
+    const q = search.toLowerCase();
+    return active.filter((m) => m.text.toLowerCase().includes(q) || m.senderName.toLowerCase().includes(q));
+  }, [messages, activeChatId, search]);
+
+  const groupedMessages = useMemo(() => {
+    const groups: Array<{ day: string; items: UiMessage[] }> = [];
+    for (const msg of filteredMessages) {
+      const day = humanDay(msg.sentAt);
+      const current = groups[groups.length - 1];
+      if (!current || current.day !== day) {
+        groups.push({ day, items: [msg] });
+      } else {
+        current.items.push(msg);
+      }
+    }
+    return groups;
+  }, [filteredMessages]);
+
   useEffect(() => {
     setOutbox(loadOutbox());
+    if (typeof window !== "undefined" && !window.localStorage.getItem(ONBOARDING_KEY)) {
+      setShowOnboarding(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -144,8 +183,8 @@ export default function ChatPage() {
       if (first) {
         setLoadingMessages(true);
         try {
-          const items = await listMessages(current, first, 80);
-          setMessages(items.reverse().map(mapEnvelopeToUi));
+          const items = await listMessages(current, first, 100);
+          setMessages(items.reverse().map((item) => mapEnvelopeToUi(item, current.user.username)));
         } finally {
           setLoadingMessages(false);
         }
@@ -232,10 +271,7 @@ export default function ChatPage() {
       flushOutbox(session, socket).catch(() => undefined);
     });
 
-    socket.on("disconnect", () => {
-      setSocketState("disconnected");
-    });
-
+    socket.on("disconnect", () => setSocketState("disconnected"));
     socket.on("chat:join:ack", () => setError(""));
 
     socket.on("chat:message", (event: {
@@ -254,6 +290,7 @@ export default function ChatPage() {
             id: String(event.messageId),
             chatId: Number(event.chatId),
             senderId: Number(event.senderId),
+            senderName: Number(event.senderId) === Number(currentUserId) ? session.user.username : `user_${event.senderId}`,
             text,
             sentAt: event.createdAt,
             receipt: Number(event.senderId) === Number(currentUserId) ? "sent" : undefined,
@@ -327,8 +364,8 @@ export default function ChatPage() {
     setTypingText("");
     setLoadingMessages(true);
     try {
-      const items = await listMessages(session, chatId, 80);
-      setMessages(items.reverse().map(mapEnvelopeToUi));
+      const items = await listMessages(session, chatId, 100);
+      setMessages(items.reverse().map((item) => mapEnvelopeToUi(item, session.user.username)));
       socketRef.current?.emit("chat:join", { chatId });
     } finally {
       setLoadingMessages(false);
@@ -353,6 +390,7 @@ export default function ChatPage() {
       id: payload.clientMessageId,
       chatId: activeChatId,
       senderId: currentUserId,
+      senderName: session.user.username,
       text,
       sentAt: payload.sentAt,
       pending: true,
@@ -374,9 +412,7 @@ export default function ChatPage() {
       await postMessage(session, activeChatId, payload);
     } catch {
       setOutbox((prev) => [...prev, { chatId: activeChatId, payload }]);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === payload.clientMessageId ? { ...m, queued: true } : m)),
-      );
+      setMessages((prev) => prev.map((m) => (m.id === payload.clientMessageId ? { ...m, queued: true } : m)));
     }
   }
 
@@ -401,7 +437,10 @@ export default function ChatPage() {
     setError("");
   }
 
-  const activeMessages = messages.filter((m) => !activeChatId || m.chatId === activeChatId);
+  function closeOnboarding() {
+    window.localStorage.setItem(ONBOARDING_KEY, "1");
+    setShowOnboarding(false);
+  }
 
   if (!session) {
     return (
@@ -425,103 +464,140 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="chat-shell chat-shell--pro">
-      <aside className="chat-sidebar">
-        <header className="chat-sidebar__header">
-          <div>
-            <p className="eyebrow">Signed in</p>
-            <h2>@{session.user.username}</h2>
+    <>
+      {showOnboarding ? (
+        <section className="onboarding-overlay" role="dialog" aria-modal="true">
+          <div className="onboarding-card">
+            <p className="eyebrow">Welcome</p>
+            <h2>Secure Workspace Setup</h2>
+            <ol>
+              <li>Messages are encrypted on the client before transport.</li>
+              <li>Queued messages sync automatically when connection returns.</li>
+              <li>Open Security page to review session and queue state.</li>
+            </ol>
+            <button className="btn btn--solid" onClick={closeOnboarding}>Continue</button>
           </div>
-          <div className="chat-sidebar__actions">
-            <Link className="btn btn--ghost btn--tiny" href="/chat/settings">Security</Link>
-            <button className="btn btn--ghost btn--tiny" onClick={onLogout}>Logout</button>
-          </div>
-        </header>
+        </section>
+      ) : null}
 
-        <div className="status-strip">
-          <span className={`status-pill ${networkOnline ? "ok" : "warn"}`}>{networkOnline ? "Online" : "Offline"}</span>
-          <span className={`status-pill ${socketState === "connected" ? "ok" : "warn"}`}>{socketState}</span>
-          <span className="status-pill neutral">Queue: {outbox.length}</span>
-        </div>
-
-        {loadingChats ? (
-          <div className="skeleton-stack">
-            <div className="skeleton-line" />
-            <div className="skeleton-line" />
-            <div className="skeleton-line" />
-          </div>
-        ) : sortedChats.length === 0 ? (
-          <p className="empty-copy">No chats yet. Create members in backend and join a chat.</p>
-        ) : (
-          <div className="chat-list">
-            {sortedChats.map((chat) => (
-              <button
-                key={chat.chat_id}
-                className={`chat-list-item ${activeChatId === chat.chat_id ? "active" : ""}`}
-                onClick={() => chooseChat(chat.chat_id)}
-              >
-                <p>Chat #{chat.chat_id}</p>
-                <small>{chat.message_count} encrypted envelopes</small>
-              </button>
-            ))}
-          </div>
-        )}
-      </aside>
-
-      <section className="chat-main">
-        <header className="chat-main__header">
-          <h3>{activeChatId ? `Conversation ${activeChatId}` : "No chat selected"}</h3>
-          <p>{typingText || "Zero-trust mode: encrypted envelopes, local decryption preview."}</p>
-        </header>
-
-        <div className="chat-stream">
-          {loadingMessages ? (
-            <div className="skeleton-stack">
-              <div className="skeleton-bubble" />
-              <div className="skeleton-bubble" />
-              <div className="skeleton-bubble" />
+      <main className="chat-shell chat-shell--pro">
+        <aside className="chat-sidebar">
+          <header className="chat-sidebar__header">
+            <div>
+              <p className="eyebrow">Signed in</p>
+              <h2>@{session.user.username}</h2>
             </div>
-          ) : activeMessages.length === 0 ? (
-            <p className="empty-copy">No messages in this chat yet.</p>
+            <div className="chat-sidebar__actions">
+              <Link className="btn btn--ghost btn--tiny" href="/chat/settings">Security</Link>
+              <button className="btn btn--ghost btn--tiny" onClick={onLogout}>Logout</button>
+            </div>
+          </header>
+
+          <div className="status-strip">
+            <span className={`status-pill ${networkOnline ? "ok" : "warn"}`}>{networkOnline ? "Online" : "Offline"}</span>
+            <span className={`status-pill ${socketState === "connected" ? "ok" : "warn"}`}>{socketState}</span>
+            <span className="status-pill neutral">Queue: {outbox.length}</span>
+          </div>
+
+          {loadingChats ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-line" />
+              <div className="skeleton-line" />
+              <div className="skeleton-line" />
+            </div>
+          ) : sortedChats.length === 0 ? (
+            <p className="empty-copy">No chats yet. Create members in backend and join a chat.</p>
           ) : (
-            activeMessages.map((message) => {
-              const mine = Number(message.senderId) === Number(currentUserId);
-              const meta = message.failed
-                ? "failed"
-                : message.queued
-                  ? "queued"
-                  : message.pending
-                    ? "sending"
-                    : message.receipt || "sent";
-
-              return (
-                <article key={`${message.id}-${message.sentAt}`} className={`bubble ${mine ? "mine" : "other"}`}>
-                  <p>{message.text}</p>
-                  <small>
-                    {new Date(message.sentAt).toLocaleTimeString()}
-                    {mine ? ` · ${meta}` : ""}
-                  </small>
-                </article>
-              );
-            })
+            <div className="chat-list">
+              {sortedChats.map((chat) => {
+                const title = chat.title || `Conversation ${chat.chat_id}`;
+                const preview = chat.last_preview || `${chat.message_count} encrypted envelopes`;
+                const unread = Number(chat.unread_count || 0);
+                return (
+                  <button
+                    key={chat.chat_id}
+                    className={`chat-list-item ${activeChatId === chat.chat_id ? "active" : ""}`}
+                    onClick={() => chooseChat(chat.chat_id)}
+                  >
+                    <div className="chat-list-item__row">
+                      <p>{title}</p>
+                      {unread > 0 ? <span className="chat-unread-pill">{unread}</span> : null}
+                    </div>
+                    <small>{preview}</small>
+                  </button>
+                );
+              })}
+            </div>
           )}
-        </div>
+        </aside>
 
-        <form className="chat-composer" onSubmit={sendMessage}>
-          <input
-            value={composer}
-            onChange={(e) => {
-              setComposer(e.target.value);
-              emitTyping();
-            }}
-            placeholder={activeChatId ? "Type encrypted message..." : "Select chat first"}
-            disabled={!activeChatId}
-          />
-          <button type="submit" disabled={!activeChatId || !composer.trim()}>Send</button>
-        </form>
+        <section className="chat-main">
+          <header className="chat-main__header">
+            <h3>{activeChatId ? `Conversation ${activeChatId}` : "No chat selected"}</h3>
+            <p>{typingText || "Zero-trust mode: encrypted envelopes, local decryption preview."}</p>
+            <input
+              className="chat-search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search messages or sender"
+            />
+          </header>
 
-        {error ? <p className="chat-error">{error}</p> : null}
-      </section>
-    </main>
+          <div className="chat-stream">
+            {loadingMessages ? (
+              <div className="skeleton-stack">
+                <div className="skeleton-bubble" />
+                <div className="skeleton-bubble" />
+                <div className="skeleton-bubble" />
+              </div>
+            ) : groupedMessages.length === 0 ? (
+              <p className="empty-copy">No messages match this view.</p>
+            ) : (
+              groupedMessages.map((group) => (
+                <section key={group.day} className="day-group">
+                  <p className="day-group__title">{group.day}</p>
+                  {group.items.map((message) => {
+                    const mine = Number(message.senderId) === Number(currentUserId);
+                    const meta = message.failed
+                      ? "failed"
+                      : message.queued
+                        ? "queued"
+                        : message.pending
+                          ? "sending"
+                          : message.receipt || "sent";
+
+                    return (
+                      <article key={`${message.id}-${message.sentAt}`} className={`bubble ${mine ? "mine" : "other"}`}>
+                        {!mine ? <p className="bubble__sender">{message.senderName}</p> : null}
+                        <p>{message.text}</p>
+                        <small>
+                          {new Date(message.sentAt).toLocaleTimeString()}
+                          {mine ? ` · ${meta}` : ""}
+                        </small>
+                      </article>
+                    );
+                  })}
+                </section>
+              ))
+            )}
+          </div>
+
+          <form className="chat-composer" onSubmit={sendMessage}>
+            <input
+              value={composer}
+              onChange={(e) => {
+                setComposer(e.target.value);
+                emitTyping();
+              }}
+              placeholder={activeChatId ? "Type encrypted message..." : "Select chat first"}
+              disabled={!activeChatId}
+            />
+            <button type="submit" disabled={!activeChatId || !composer.trim()}>Send</button>
+          </form>
+
+          {error ? <p className="chat-error">{error}</p> : null}
+        </section>
+      </main>
+    </>
   );
 }

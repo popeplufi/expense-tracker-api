@@ -16,6 +16,9 @@ export interface ChatSummary {
   chat_id: number;
   last_created_at: string | null;
   message_count: number;
+  title?: string;
+  unread_count?: number;
+  last_preview?: string | null;
 }
 
 export interface ChatEnvelope {
@@ -28,6 +31,7 @@ export interface ChatEnvelope {
   sent_at_client: string;
   metadata: Record<string, unknown>;
   created_at: string;
+  sender_username?: string;
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
