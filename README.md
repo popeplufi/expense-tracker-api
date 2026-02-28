@@ -47,6 +47,9 @@ A new production-grade gateway scaffold is included in `gateway/`:
 - Audit logging to PostgreSQL
 - WebSocket + Redis pub/sub adapter for horizontal scaling
 - Device key registration and pre-key bundle retrieval for async encrypted messaging
+- Chat REST APIs for envelope ingestion and pagination
+- Prometheus metrics endpoint and instrumentation
+- Versioned SQL migrations + startup migration runner
 
 See: `gateway/README.md`
 

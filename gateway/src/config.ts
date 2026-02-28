@@ -32,6 +32,10 @@ export const config = {
     maxCiphertextBytes: Number(process.env.WS_MAX_CIPHERTEXT_BYTES ?? 12_000),
     maxMessagesPerWindow: Number(process.env.WS_MAX_MESSAGES_PER_WINDOW ?? 20),
     messageWindowMs: Number(process.env.WS_MESSAGE_WINDOW_MS ?? 10_000),
-    replayWindowMs: Number(process.env.WS_REPLAY_WINDOW_MS ?? 5 * 60 * 1000)
+    replayWindowMs: Number(process.env.WS_REPLAY_WINDOW_MS ?? 5 * 60 * 1000),
+    envelopeHmacSecret: process.env.WS_ENVELOPE_HMAC_SECRET ?? ""
+  },
+  metrics: {
+    enabled: (process.env.METRICS_ENABLED ?? "1") === "1"
   }
 };

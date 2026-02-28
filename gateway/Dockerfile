@@ -18,4 +18,4 @@ COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
 
 EXPOSE 4000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/scripts/migrate.js && node dist/index.js"]

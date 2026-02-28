@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { createAdapter } from "@socket.io/redis-adapter";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { Redis } from "ioredis";
 import type { Socket } from "socket.io";
 import { Server } from "socket.io";
 
 import { config } from "../../config.js";
+import { wsMessagesAccepted, wsMessagesRejected } from "../../plugins/metrics.js";
 
 type SocketUser = {
   userId: number;
@@ -19,6 +21,7 @@ type ChatSendPayload = {
   nonce: string;
   ciphertext: string;
   sentAt: string;
+  signature?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -37,6 +40,23 @@ function withinReplayWindow(sentAt: string): boolean {
   const sent = Date.parse(sentAt);
   if (!Number.isFinite(sent)) return false;
   return Math.abs(nowMs() - sent) <= config.ws.replayWindowMs;
+}
+
+function verifyEnvelopeSignature(payload: ChatSendPayload): boolean {
+  if (!config.ws.envelopeHmacSecret) return true;
+  if (!payload.signature) return false;
+  const body = [
+    String(payload.chatId),
+    payload.clientMessageId,
+    payload.nonce,
+    payload.ciphertext,
+    payload.sentAt,
+  ].join("|");
+  const digest = crypto
+    .createHmac("sha256", config.ws.envelopeHmacSecret)
+    .update(body)
+    .digest("hex");
+  return digest === payload.signature;
 }
 
 function socketBackpressure(socket: Socket): number {
@@ -296,6 +316,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
     socket.on("chat:send", async (payload: ChatSendPayload) => {
       try {
         if (!consumeMessageQuota(user.userId)) {
+          wsMessagesRejected.inc({ reason: "rate_limited" });
           emitSocketError(socket, "rate_limited", "Too many messages");
           return;
         }
@@ -308,17 +329,26 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
           !payload.ciphertext ||
           !payload.sentAt
         ) {
+          wsMessagesRejected.inc({ reason: "bad_payload" });
           emitSocketError(socket, "bad_payload", "Invalid chat:send payload");
           return;
         }
 
+        if (!verifyEnvelopeSignature(payload)) {
+          wsMessagesRejected.inc({ reason: "signature_invalid" });
+          emitSocketError(socket, "signature_invalid", "Invalid message signature");
+          return;
+        }
+
         if (!withinReplayWindow(payload.sentAt)) {
+          wsMessagesRejected.inc({ reason: "replay_window" });
           emitSocketError(socket, "replay_window", "Message outside replay window");
           return;
         }
 
         const cipherBytes = Buffer.byteLength(payload.ciphertext, "utf8");
         if (cipherBytes > config.ws.maxCiphertextBytes) {
+          wsMessagesRejected.inc({ reason: "payload_too_large" });
           emitSocketError(socket, "payload_too_large", "Ciphertext too large");
           return;
         }
@@ -326,6 +356,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
         const chatId = Number(payload.chatId);
         const allowed = await isChatMember(fastify, user.userId, chatId);
         if (!allowed) {
+          wsMessagesRejected.inc({ reason: "forbidden" });
           emitSocketError(socket, "forbidden", "Not a member of this chat");
           return;
         }
@@ -333,6 +364,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
         const replayKey = `replay:${user.userId}:${payload.nonce}`;
         const replayGuard = await fastify.redis.set(replayKey, "1", "PX", config.ws.replayWindowMs, "NX");
         if (!replayGuard) {
+          wsMessagesRejected.inc({ reason: "replay_nonce" });
           emitSocketError(socket, "replay_nonce", "Nonce already used");
           return;
         }
@@ -354,6 +386,7 @@ export async function attachWebsocketServer(fastify: FastifyInstance): Promise<S
           createdAt: stored.createdAt,
           duplicate: stored.duplicate,
         };
+        wsMessagesAccepted.inc();
 
         if (!enforceBackpressure(socket)) return;
         socket.emit("chat:ack", {

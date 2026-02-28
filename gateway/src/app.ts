@@ -7,9 +7,12 @@ import { authRoutes } from "./modules/auth/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
 import { auditRoutes } from "./modules/audit/routes.js";
 import { deviceKeyRoutes } from "./modules/device-keys/routes.js";
+import { chatRoutes } from "./modules/chats/routes.js";
+import { metricsRoutes } from "./modules/metrics/routes.js";
 import { auditPlugin } from "./plugins/audit.js";
 import { dbPlugin } from "./plugins/db.js";
 import { jwtPlugin } from "./plugins/jwt.js";
+import { metricsPlugin } from "./plugins/metrics.js";
 import { rateLimitPlugin } from "./plugins/rate-limit.js";
 import { redisPlugin } from "./plugins/redis.js";
 import { attachWebsocketServer } from "./modules/ws/server.js";
@@ -27,12 +30,15 @@ export async function buildApp() {
   await app.register(dbPlugin);
   await app.register(jwtPlugin);
   await app.register(rateLimitPlugin);
+  await app.register(metricsPlugin);
   await app.register(auditPlugin);
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(deviceKeyRoutes);
+  await app.register(chatRoutes);
   await app.register(auditRoutes);
+  await app.register(metricsRoutes);
 
   await attachWebsocketServer(app);
 

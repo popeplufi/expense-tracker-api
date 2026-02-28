@@ -13,9 +13,13 @@ Node.js Fastify gateway implementing:
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /metrics` (Prometheus format)
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
 - `POST /v1/auth/logout`
+- `GET /v1/chats`
+- `GET /v1/chats/:chatId/messages`
+- `POST /v1/chats/:chatId/messages`
 - `POST /v1/devices/keys`
 - `GET /v1/devices/keys/:userId`
 - `GET /v1/audit/logs`
@@ -32,12 +36,13 @@ Node.js Fastify gateway implementing:
 cd gateway
 cp .env.example .env
 npm install
+npm run migrate
 npm run dev
 ```
 
 ## Database
 
-Initialize PostgreSQL schema using `gateway/sql/init.sql`.
+Migrations run from `gateway/migrations/*.sql` via `npm run migrate`.
 
 The bootstrap admin user is:
 - username: `admin`
