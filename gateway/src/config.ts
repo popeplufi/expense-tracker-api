@@ -24,5 +24,14 @@ export const config = {
   rateLimit: {
     max: Number(process.env.RATE_LIMIT_MAX ?? 120),
     timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? "1 minute"
+  },
+  ws: {
+    heartbeatIntervalMs: Number(process.env.WS_HEARTBEAT_INTERVAL_MS ?? 10_000),
+    heartbeatTimeoutMs: Number(process.env.WS_HEARTBEAT_TIMEOUT_MS ?? 30_000),
+    maxQueueSize: Number(process.env.WS_MAX_QUEUE_SIZE ?? 200),
+    maxCiphertextBytes: Number(process.env.WS_MAX_CIPHERTEXT_BYTES ?? 12_000),
+    maxMessagesPerWindow: Number(process.env.WS_MAX_MESSAGES_PER_WINDOW ?? 20),
+    messageWindowMs: Number(process.env.WS_MESSAGE_WINDOW_MS ?? 10_000),
+    replayWindowMs: Number(process.env.WS_REPLAY_WINDOW_MS ?? 5 * 60 * 1000)
   }
 };

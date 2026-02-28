@@ -51,6 +51,43 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 
+CREATE TABLE IF NOT EXISTS chats (
+  id BIGSERIAL PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'direct',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_members (
+  chat_id BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (chat_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_envelopes (
+  id BIGSERIAL PRIMARY KEY,
+  chat_id BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  sender_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_message_id TEXT NOT NULL,
+  ciphertext TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  sent_at_client TIMESTAMPTZ NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (sender_user_id, client_message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_envelopes_chat_created
+  ON message_envelopes(chat_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS message_receipts (
+  message_id BIGINT NOT NULL REFERENCES message_envelopes(id) ON DELETE CASCADE,
+  recipient_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  delivered_at TIMESTAMPTZ NULL,
+  seen_at TIMESTAMPTZ NULL,
+  PRIMARY KEY (message_id, recipient_user_id)
+);
+
 INSERT INTO users (username, password_hash)
 VALUES ('admin', '$2b$12$0f7e3A1F4Nkrptdr5Pjci.OjR6v5VhQvQm8nM6wIY5J5J9OcW7jYS')
 ON CONFLICT (username) DO NOTHING;
