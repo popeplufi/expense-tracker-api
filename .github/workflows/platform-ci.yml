@@ -29,6 +29,10 @@ jobs:
   python-api:
     name: Python API
     runs-on: ubuntu-latest
+    env:
+      DATABASE_PATH: /tmp/expenses_ci.db
+      BACKUP_DIR: /tmp/expense_backups
+      AUTO_RESTORE_FROM_BACKUP: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +45,17 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          for i in 1 2 3; do
+            if pip install -r requirements.txt; then
+              exit 0
+            fi
+            echo "pip install attempt $i failed, retrying..."
+            sleep 5
+          done
+          echo "pip install failed after retries"
+          exit 1
 
       - name: Static compile check
         run: python -m compileall app
@@ -53,9 +67,9 @@ jobs:
           c = app.test_client()
           health = c.get("/healthz")
           ready = c.get("/readyz")
-          assert health.status_code == 200, health.status_code
-          assert ready.status_code in (200, 503), ready.status_code
-          print("healthz=", health.status_code, "readyz=", ready.status_code)
+          assert health.status_code == 200, (health.status_code, health.get_data(as_text=True))
+          assert ready.status_code in (200, 503), (ready.status_code, ready.get_data(as_text=True))
+          print("healthz=", health.status_code, "readyz=", ready.status_code, "db=", app.config.get("DATABASE"))
           PY
 
   gateway:
